@@ -1,58 +1,105 @@
-# Fold AI — Zero-Touch Setup Guide for Claude Code
+# Fold AI — Zero-Touch Setup
 
-All your friend needs to do is:
-1. Create a new empty folder on their Mac.
-2. Open **Claude Code** (or Antigravity) inside that folder.
-3. Paste the prompt below. That's it.
+## How to Set Up
+
+1. Create a new empty folder anywhere on your Mac.
+2. Open **Claude Code** (or any Claude agent with terminal access) inside that folder.
+3. Paste the prompt below. Everything else is automatic.
 
 ---
 
-## 🚀 Zero-Touch Setup Prompt (Paste This Into Claude Code)
+## 🚀 Paste This Prompt Into Claude Code
 
 ```
-I want to set up my personal local Fold AI expense companion from scratch. Automate the entire setup end-to-end with no manual steps.
+Set up the Fold AI local expense companion for me. I expect you to do everything automatically — install dependencies, build all code, configure everything. The ONLY things I will do manually are:
+- Type my phone number when asked
+- Enter the OTP sent to my phone
 
-Step 1 — Clone the repository into the current directory:
-  git clone https://github.com/naman0815/fold-mcp .
+Begin now. Do not wait for permission between steps. Run every command yourself.
 
-Step 2 — Check dependencies. Verify that Node.js and Go are installed.
-  If Node.js is missing, instruct me to install it from https://nodejs.org
-  If Go is missing, instruct me to install it from https://golang.org/dl
+─────────────────────────────────────────
 
-Step 3 — Build the MCP server:
-  cd fold-mcp && npm install && npm run build && cd ..
+STEP 1 — Clone the repository into the current directory:
+  Run: git clone https://github.com/naman0815/fold-mcp .
 
-Step 4 — Build the Go CLI (the unfold_cli tool that authenticates with Fold):
-  cd unfold_cli && go build -o ../unfold_patched . && cd ..
+─────────────────────────────────────────
 
-Step 5 — Log in to my Fold account using the unfold CLI:
+STEP 2 — Install system dependencies if missing. Check and install each:
+
+  a) Homebrew (required for everything else):
+     Check: command -v brew
+     Install if missing:
+       /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+  b) Node.js (v18 or later):
+     Check: node --version
+     Install if missing: brew install node
+
+  c) Go (v1.20 or later):
+     Check: go version
+     Install if missing: brew install go
+
+─────────────────────────────────────────
+
+STEP 3 — Build the MCP server (TypeScript → JavaScript):
+  Run: cd fold-mcp && npm install && npm run build && cd ..
+
+─────────────────────────────────────────
+
+STEP 4 — Build the unfold Go CLI (used for Fold authentication and syncing):
+  Run: cd unfold_cli && go build -o ../unfold_patched . && cd ..
+
+─────────────────────────────────────────
+
+STEP 5 — Authenticate with my Fold account:
   Run: ./unfold_patched login
-  It will prompt me for my Indian phone number (without +91) and then send an OTP to my phone.
-  Enter the OTP when prompted. This stores my session token in ~/.config/unfold/config.yaml.
 
-Step 6 — Configure Claude Desktop to use this MCP server:
-  Find my Claude Desktop config file at:
-    ~/Library/Application Support/Claude/claude_desktop_config.json
-  Add this entry under "mcpServers" (replace <ABSOLUTE_PATH> with the full path to this directory):
+  This will prompt me to enter:
+    1. My phone number (without country code, e.g. 9876543210)
+    2. The OTP Fold sends to that number via SMS
+
+  Wait for me to complete the login before proceeding.
+
+─────────────────────────────────────────
+
+STEP 6 — Configure Claude Desktop to use the MCP server:
+  The config file is at: ~/Library/Application Support/Claude/claude_desktop_config.json
+
+  Read the current file (if it exists). Add a "fold" entry under "mcpServers" using the
+  ABSOLUTE PATH to this directory. The entry should look like this (replace <DIR> with the
+  real absolute path to the current working directory):
+
   {
-    "fold": {
-      "command": "node",
-      "args": ["<ABSOLUTE_PATH>/fold-mcp/build/index.js"]
+    "mcpServers": {
+      "fold": {
+        "command": "node",
+        "args": ["<DIR>/fold-mcp/build/index.js"]
+      }
     }
   }
 
-Step 7 — Perform the initial sync of all my Fold transaction history:
-  Tell me to open Claude Desktop (restart it if already open) and ask it to:
-  "Sync my Fold data from 2015-01-01"
-  This will populate my local db.sqlite with all my historical transactions.
+  If the file already has other mcpServers, merge the "fold" entry in — do not overwrite.
+  Write the final JSON back to the file.
 
-Let's begin!
+  If you cannot write to this file, print the exact JSON to paste and tell me which file to update.
+
+─────────────────────────────────────────
+
+STEP 7 — Confirm setup is complete and tell me to:
+  1. Fully quit and relaunch Claude Desktop (Cmd+Q, then reopen).
+  2. Once relaunched, ask Claude: "Sync my Fold data from 2015-01-01"
+     This will populate my local database with my full transaction history.
+
+─────────────────────────────────────────
+
+Go ahead and start from Step 1 now.
 ```
 
 ---
 
-## 🔒 How Auth & Privacy Works
+## 🔒 Privacy & Security
 
-- **Auth**: The `unfold_patched` CLI uses your Indian phone number + OTP (sent by Fold) to authenticate. No passwords. Tokens are stored locally in `~/.config/unfold/config.yaml` on your own machine.
-- **Data Isolation**: Your transactions are stored in `db.sqlite` inside your local folder — never committed to GitHub (it's in `.gitignore`), never shared with anyone else.
-- **Tokens are personal**: Even if two friends share the same GitHub repo, each person logs in separately with their own phone number and gets their own tokens and their own local database.
+- **Auth is phone + OTP only** — the unfold CLI uses your Indian mobile number and a one-time SMS code sent by Fold. No passwords. No API keys to copy.
+- **Tokens stored locally** at `~/.config/unfold/config.yaml` on your machine — never shared.
+- **Your data never touches GitHub** — `db.sqlite` is in `.gitignore` and only ever lives on your computer.
+- **Each person's setup is completely isolated** — their own tokens, their own local database.
