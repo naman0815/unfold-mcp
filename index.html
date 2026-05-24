@@ -498,9 +498,9 @@
       <div class="settings-body">
 
         <div class="field">
-          <label>Hugging Face API key</label>
-          <input type="password" id="api-key" placeholder="hf_..." value="">
-          <div class="field-hint">Stored in localStorage only. Never sent anywhere except Hugging Face. Get a free token at huggingface.co/settings/tokens</div>
+          <label>OpenRouter API key</label>
+          <input type="password" id="api-key" placeholder="sk-or-..." value="">
+          <div class="field-hint">Stored in localStorage only. Get a free key at openrouter.ai to use Qwen 2.5 7B for free directly in the browser!</div>
         </div>
 
         <div class="field">
@@ -833,10 +833,10 @@ RECENT TRANSACTIONS (last 50):
 ${recent}`;
 }
 
-// ── Hugging Face Qwen API ─────────────────────────────────────────────────────
+// ── OpenRouter Qwen API ───────────────────────────────────────────────────────
 async function callLLM(userMessage) {
   const s = getSettings();
-  if (!s.apiKey) throw new Error('No Hugging Face API key set. Open settings and add your API key.');
+  if (!s.apiKey) throw new Error('No OpenRouter API key set. Open settings and add your API key.');
 
   const context = buildContext();
   const baseSystem = `You are a personal finance assistant with access to the user's expense data from the Fold app. 
@@ -855,14 +855,16 @@ ${context}`;
     { role: 'user', content: userMessage }
   ];
 
-  const resp = await fetch('https://api-inference.huggingface.co/models/Qwen/Qwen2.5-7B-Instruct/v1/chat/completions', {
+  const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: { 
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${s.apiKey}`
+      'Authorization': `Bearer ${s.apiKey}`,
+      'HTTP-Referer': 'http://localhost:3000',
+      'X-Title': 'Fold Companion Pro'
     },
     body: JSON.stringify({
-      model: 'Qwen/Qwen2.5-7B-Instruct',
+      model: 'qwen/qwen-2.5-7b-instruct:free',
       messages,
       max_tokens: 1024
     }),
