@@ -12,24 +12,23 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Sora:wght@300;400;500;600&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: #0e0f11;
-      --surface: #16181c;
-      --surface2: #1e2026;
-      --border: rgba(255,255,255,0.07);
-      --border-bright: rgba(255,255,255,0.14);
-      --text: #e8e9eb;
-      --text-muted: #7a7d85;
-      --text-dim: #4a4d55;
-      --accent: #5cdb95;
-      --accent-dim: rgba(92,219,149,0.12);
-      --accent-glow: rgba(92,219,149,0.25);
-      --user-bubble: #1e2a22;
-      --user-border: rgba(92,219,149,0.2);
+      --bg: #08090a;
+      --surface: rgba(255, 255, 255, 0.03);
+      --surface2: rgba(255, 255, 255, 0.05);
+      --border: rgba(255, 255, 255, 0.08);
+      --border-bright: rgba(255, 255, 255, 0.15);
+      --text: #f5f5f7;
+      --text-muted: #86868b;
+      --text-dim: #636366;
+      --accent: #10b981;
+      --accent-glow: rgba(16, 185, 129, 0.3);
+      --user-bubble: rgba(16, 185, 129, 0.1);
+      --user-border: rgba(16, 185, 129, 0.2);
       --danger: #ff6b6b;
       --warning: #ffd166;
       --mono: 'DM Mono', monospace;
       --sans: 'Sora', sans-serif;
-      --radius: 14px;
+      --radius: 16px;
       --safe-bottom: env(safe-area-inset-bottom, 0px);
     }
 
@@ -59,7 +58,9 @@
       justify-content: space-between;
       padding: 16px 20px 14px;
       border-bottom: 1px solid var(--border);
-      background: var(--bg);
+      background: rgba(8, 9, 10, 0.7);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
       position: relative;
       z-index: 10;
       flex-shrink: 0;
@@ -117,7 +118,9 @@
       position: absolute; top: 0; right: 0;
       width: min(340px, 100%);
       height: 100%;
-      background: var(--surface);
+      background: rgba(8, 9, 10, 0.7);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
       border-left: 1px solid var(--border);
       z-index: 20;
       transform: translateX(100%);
@@ -337,7 +340,9 @@
       padding: 12px 16px;
       padding-bottom: max(12px, var(--safe-bottom));
       border-top: 1px solid var(--border);
-      background: var(--bg);
+      background: rgba(8, 9, 10, 0.7);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
       flex-shrink: 0;
     }
 
@@ -530,6 +535,7 @@
         <div class="btn-row">
           <button class="btn btn-primary" onclick="saveSettings()">Save</button>
           <button class="btn btn-secondary" onclick="syncExpenses()">Sync now</button>
+          <button class="btn btn-secondary" onclick="loadDemoData()">Try Demo Mode</button>
         </div>
 
         <div class="divider"></div>
@@ -700,6 +706,26 @@ function loadCache() {
     updateStats();
   }
   updateCacheInfo();
+}
+
+function loadDemoData() {
+  const demoTxns = [
+    { id: 'd1', date: new Date().toISOString(), amount: -2500, type: 'debit', category: 'Shopping', merchant: 'Apple Store' },
+    { id: 'd2', date: new Date(Date.now() - 86400000).toISOString(), amount: -450, type: 'debit', category: 'Dining', merchant: 'Coffee Shop' },
+    { id: 'd3', date: new Date(Date.now() - 86400000 * 2).toISOString(), amount: -1500, type: 'debit', category: 'Groceries', merchant: 'Supermarket' },
+    { id: 'd4', date: new Date(Date.now() - 86400000 * 3).toISOString(), amount: -800, type: 'debit', category: 'Transportation', merchant: 'Uber' },
+    { id: 'd5', date: new Date(Date.now() - 86400000 * 4).toISOString(), amount: -3200, type: 'debit', category: 'Entertainment', merchant: 'Movie Theater' },
+    { id: 'd6', date: new Date(Date.now() - 86400000 * 5).toISOString(), amount: 50000, type: 'credit', category: 'Income', merchant: 'Salary' }
+  ];
+  transactions = demoTxns;
+  localStorage.setItem('fc_cache', JSON.stringify(transactions));
+  document.getElementById('conn-label').textContent = 'demo';
+  document.getElementById('conn-dot').className = 'status-dot connected';
+  updateStats();
+  toast('Demo mode activated!');
+  showMessages();
+  addBubble('ai', 'Demo data loaded. Ask me about your spending!');
+  toggleSettings();
 }
 
 function updateStats() {
