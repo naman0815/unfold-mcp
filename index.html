@@ -498,9 +498,9 @@
       <div class="settings-body">
 
         <div class="field">
-          <label>Claude API key</label>
-          <input type="password" id="api-key" placeholder="sk-ant-..." value="">
-          <div class="field-hint">Stored in localStorage only. Never sent anywhere except api.anthropic.com.</div>
+          <label>Hugging Face API key</label>
+          <input type="password" id="api-key" placeholder="hf_..." value="">
+          <div class="field-hint">Stored in localStorage only. Never sent anywhere except Hugging Face. Get a free token at huggingface.co/settings/tokens</div>
         </div>
 
         <div class="field">
@@ -833,10 +833,10 @@ RECENT TRANSACTIONS (last 50):
 ${recent}`;
 }
 
-// ── Claude API ────────────────────────────────────────────────────────────────
-async function callClaude(userMessage) {
+// ── Hugging Face Qwen API ─────────────────────────────────────────────────────
+async function callLLM(userMessage) {
   const s = getSettings();
-  if (!s.apiKey) throw new Error('No API key set. Open settings and add your Claude API key.');
+  if (!s.apiKey) throw new Error('No Hugging Face API key set. Open settings and add your API key.');
 
   const context = buildContext();
   const baseSystem = `You are a personal finance assistant with access to the user's expense data from the Fold app. 
@@ -850,28 +850,31 @@ ${s.systemPrompt ? 'Additional instructions: ' + s.systemPrompt : ''}
 ${context}`;
 
   const messages = [
-    ...chatHistory,
+    { role: 'system', content: baseSystem },
+    ...chatHistory.map(h => ({ role: h.role === 'ai' ? 'assistant' : h.role, content: h.content })),
     { role: 'user', content: userMessage }
   ];
 
-  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+  const resp = await fetch('https://api-inference.huggingface.co/models/Qwen/Qwen2.5-7B-Instruct/v1/chat/completions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${s.apiKey}`
+    },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
-      system: baseSystem,
+      model: 'Qwen/Qwen2.5-7B-Instruct',
       messages,
+      max_tokens: 1024
     }),
   });
 
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({}));
-    throw new Error(err.error?.message || `API error ${resp.status}`);
+    throw new Error(err.error?.message || err.error || `API error ${resp.status}`);
   }
 
   const data = await resp.json();
-  return data.content[0]?.text || '(empty response)';
+  return data.choices?.[0]?.message?.content || '(empty response)';
 }
 
 // ── Chat UI ───────────────────────────────────────────────────────────────────
@@ -949,7 +952,7 @@ async function sendMessage(overrideText) {
   addTypingIndicator();
 
   try {
-    const reply = await callClaude(text);
+    const reply = await callLLM(text);
     removeTypingIndicator();
     addBubble('ai', reply);
     chatHistory.push({ role: 'user', content: text });
