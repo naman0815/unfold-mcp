@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "fold": {
+      "command": "node",
+      "args": [
+        "/Users/namanganapathi/Documents/fold-ai/fold-mcp/build/index.js"
+      ]
+    }
+  }
+}

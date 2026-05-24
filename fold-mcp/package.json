@@ -1,0 +1,21 @@
+{
+  "name": "fold-mcp",
+  "version": "1.0.0",
+  "description": "MCP Server for Fold Expenses",
+  "main": "build/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node build/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.5.0",
+    "sqlite3": "^5.1.7",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "@types/sqlite3": "^3.1.11",
+    "typescript": "^5.7.3"
+  }
+}

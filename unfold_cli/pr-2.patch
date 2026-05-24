@@ -1,0 +1,789 @@
+From a4e5681d60170dc709a33e5ef7509843ef7a5ee0 Mon Sep 17 00:00:00 2001
+From: coherent-cache <rbkv2.0@gmail.com>
+Date: Sun, 8 Mar 2026 23:46:14 +0530
+Subject: [PATCH 1/5] fix: resolve API failures and crash bugs
+
+- Add missing Content-Type: application/json header to API requests,
+  which caused 422 errors on all POST endpoints (login, OTP, refresh)
+- Update transactions endpoint from v1 to v2 (v1 now returns 404)
+- Add bounds checks in transaction pagination to prevent panics on
+  empty responses and nil pointer dereferences
+- Handle missing ledger file gracefully in parser instead of crashing
+- Add --phone and --otp flags to login command for non-interactive use
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ api/client.go       |  1 +
+ api/transactions.go | 35 ++++++++++++++++++++++-------------
+ cmd/login.go        | 40 +++++++++++++++++++++++++++++-----------
+ ledger/parser.go    | 10 +++++++---
+ 4 files changed, 59 insertions(+), 27 deletions(-)
+
+diff --git a/api/client.go b/api/client.go
+index fa996ff..e564004 100644
+--- a/api/client.go
++++ b/api/client.go
+@@ -28,6 +28,7 @@ func APIRequest(method, path string, body io.Reader) (*http.Request, error) {
+ 	}
+ 
+ 	req.Header.Set("Authorization", "Bearer "+viper.GetString("token.access"))
++	req.Header.Set("Content-Type", "application/json")
+ 	req.Header.Set("User-Agent", "ua/unfold")
+ 	req.Header.Set("X-Device-Hash", viper.GetString("device_hash"))
+ 	req.Header.Set("X-Device-Location", "India")
+diff --git a/api/transactions.go b/api/transactions.go
+index c6552a8..2bcd273 100644
+--- a/api/transactions.go
++++ b/api/transactions.go
+@@ -126,7 +126,7 @@ func Transactions(uuid string, since time.Time, till time.Time) (TransactionsRet
+ 
+ 	RefreshOrFail()
+ 
+-	req, _ := APIRequest("GET", Url("/v1/users/"+uuid+"/transactions"), nil)
++	req, _ := APIRequest("GET", Url("/v2/users/"+uuid+"/transactions"), nil)
+ 
+ 	randomCursor := randomCursor() + "," + till.Format(time.RFC3339)
+ 	log.Debug().Msg("Random cursor generated: " + randomCursor)
+@@ -153,13 +153,18 @@ func Transactions(uuid string, since time.Time, till time.Time) (TransactionsRet
+ 
+ 		data := TransactionsResponse{}
+ 		json.NewDecoder(resp.Body).Decode(&data)
+-		log.Debug().Msgf("Transactions response body: %+v", data.Data.Transactions[0].TxnTimestamp)
+ 
+ 		var ret TransactionsReturn
+ 		ret.Transactions = make([]FilteredTransactions, 0)
++
++		if len(data.Data.Transactions) == 0 {
++			return ret, nil
++		}
++
++		log.Debug().Msgf("Transactions response body: %+v", data.Data.Transactions[0].TxnTimestamp)
+ 		ret.Transactions = append(ret.Transactions, filterTransactions(data, since)...)
+ 
+-		for data.Data.Transactions[len(data.Data.Transactions)-1].TxnTimestamp.After(since) {
++		for len(data.Data.Transactions) > 0 && data.Data.Transactions[len(data.Data.Transactions)-1].TxnTimestamp.After(since) {
+ 			log.Debug().Msg("Fetching older transactions")
+ 
+ 			log.Debug().Msg("New cursor base64: " + data.Data.After)
+@@ -167,22 +172,26 @@ func Transactions(uuid string, since time.Time, till time.Time) (TransactionsRet
+ 			req.URL.RawQuery = q.Encode()
+ 
+ 			resp, err := Client.Do(req)
+-			log.Debug().Msgf("Transactions response status: %+v", resp.StatusCode)
+-
+ 			if err != nil {
+ 				log.Warn().Msg("Failed to fetch older transactions")
+ 				break
+-			} else {
+-				if resp.StatusCode/100 != 2 {
+-					log.Warn().Msgf("Failed to fetch older transactions, status code: %+v", resp.StatusCode)
+-					break
+-				}
++			}
+ 
+-				json.NewDecoder(resp.Body).Decode(&data)
+-				log.Debug().Msgf("Transactions response body: %+v", data.Data.Transactions[0].TxnTimestamp)
++			log.Debug().Msgf("Transactions response status: %+v", resp.StatusCode)
+ 
+-				ret.Transactions = append(ret.Transactions, filterTransactions(data, since)...)
++			if resp.StatusCode/100 != 2 {
++				log.Warn().Msgf("Failed to fetch older transactions, status code: %+v", resp.StatusCode)
++				break
+ 			}
++
++			json.NewDecoder(resp.Body).Decode(&data)
++
++			if len(data.Data.Transactions) == 0 {
++				break
++			}
++
++			log.Debug().Msgf("Transactions response body: %+v", data.Data.Transactions[0].TxnTimestamp)
++			ret.Transactions = append(ret.Transactions, filterTransactions(data, since)...)
+ 		}
+ 
+ 		return ret, nil
+diff --git a/cmd/login.go b/cmd/login.go
+index bf7016a..cf6ddfc 100644
+--- a/cmd/login.go
++++ b/cmd/login.go
+@@ -19,22 +19,40 @@ var LoginCmd = &cobra.Command{
+ 	Run:   loginCmdHandler,
+ }
+ 
++func init() {
++	LoginCmd.Flags().StringP("phone", "p", "", "Phone number (without +91 prefix)")
++	LoginCmd.Flags().StringP("otp", "o", "", "OTP received via SMS (requires --phone)")
++}
++
+ func loginCmdHandler(cmd *cobra.Command, args []string) {
+-	fmt.Print("Enter the phone number associated with your fold account: ")
+-	phone := bufio.NewScanner(os.Stdin)
+-	phone.Scan()
++	phoneFlag, _ := cmd.Flags().GetString("phone")
++	otpFlag, _ := cmd.Flags().GetString("otp")
+ 
+-	err := api.Login("+91" + phone.Text())
+-	if err != nil {
+-		log.Error().Err(err).Msg("Login response: ")
+-		runtime.Goexit()
++	var phoneNum string
++	if phoneFlag != "" {
++		phoneNum = phoneFlag
++	} else {
++		fmt.Print("Enter the phone number associated with your fold account: ")
++		phone := bufio.NewScanner(os.Stdin)
++		phone.Scan()
++		phoneNum = phone.Text()
+ 	}
+ 
+-	fmt.Print("Login request successful, enter OTP: ")
+-	otp := bufio.NewScanner(os.Stdin)
+-	otp.Scan()
++	// If --otp is not provided, request OTP first
++	if otpFlag == "" {
++		err := api.Login("+91" + phoneNum)
++		if err != nil {
++			log.Error().Err(err).Msg("Login response: ")
++			runtime.Goexit()
++		}
++
++		fmt.Print("Login request successful, enter OTP: ")
++		otp := bufio.NewScanner(os.Stdin)
++		otp.Scan()
++		otpFlag = otp.Text()
++	}
+ 
+-	access, refresh, err := api.VerifyOtp("+91"+phone.Text(), otp.Text())
++	access, refresh, err := api.VerifyOtp("+91"+phoneNum, otpFlag)
+ 	if err != nil {
+ 		log.Error().Err(err).Msg("Verify otp response: ")
+ 		runtime.Goexit()
+diff --git a/ledger/parser.go b/ledger/parser.go
+index 44e2a8c..faefdea 100644
+--- a/ledger/parser.go
++++ b/ledger/parser.go
+@@ -9,16 +9,20 @@ import (
+ )
+ 
+ func GetPresentUUIDs(filename string) map[string]bool {
++	uuids := make(map[string]bool)
++
+ 	file, err := os.Open(filename)
+ 	if err != nil {
++		if os.IsNotExist(err) {
++			log.Debug().Msgf("Ledger file does not exist yet: %s", filename)
++			return uuids
++		}
+ 		log.Error().Err(err).Msgf("Failed to open ledger file for parsing: %+v", filename)
++		return uuids
+ 	}
+ 
+ 	defer file.Close()
+ 
+-	var uuids map[string]bool
+-	uuids = make(map[string]bool)
+-
+ 	scanner := bufio.NewScanner(file)
+ 	for scanner.Scan() {
+ 		text := scanner.Text()
+
+From 645300881267343a9069207d5f4a338a606ce77e Mon Sep 17 00:00:00 2001
+From: coherent-cache <rbkv2.0@gmail.com>
+Date: Tue, 10 Mar 2026 02:19:46 +0530
+Subject: [PATCH 2/5] Preserve enriched transaction metadata from v2 API
+
+The v2 transactions API returns Category, Tags, Mode, Reference, Notes,
+and ExcludedFromCashFlow but filterTransactions() was discarding them.
+Extend FilteredTransactions struct, db.Transactions model, and writeToDb()
+to capture all 6 fields. Enables downstream tools to use Fold's own
+classification data (37 categories, payment modes, cash flow exclusions).
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ api/transactions.go | 54 +++++++++++++++++++++++++++++++++------------
+ cmd/transactions.go | 20 +++++++++++------
+ db/models.go        | 20 +++++++++++------
+ 3 files changed, 66 insertions(+), 28 deletions(-)
+
+diff --git a/api/transactions.go b/api/transactions.go
+index 2bcd273..264dc04 100644
+--- a/api/transactions.go
++++ b/api/transactions.go
+@@ -74,13 +74,19 @@ type TransactionsResponse struct {
+ }
+ 
+ type FilteredTransactions struct {
+-	UUID           string    `json:"uuid"`
+-	Amount         float64   `json:"amount"`
+-	CurrentBalance float64   `json:"current_balance"`
+-	TxnTimestamp   time.Time `json:"txn_timestamp"`
+-	Type           string    `json:"type"`
+-	Account        string    `json:"account"`
+-	Merchant       string    `json:"merchant"`
++	UUID                 string    `json:"uuid"`
++	Amount               float64   `json:"amount"`
++	CurrentBalance       float64   `json:"current_balance"`
++	TxnTimestamp         time.Time `json:"txn_timestamp"`
++	Type                 string    `json:"type"`
++	Account              string    `json:"account"`
++	Merchant             string    `json:"merchant"`
++	Category             string    `json:"category"`
++	Tags                 string    `json:"tags"`
++	Mode                 string    `json:"mode"`
++	Reference            string    `json:"reference"`
++	Notes                string    `json:"notes"`
++	ExcludedFromCashFlow bool      `json:"excluded_from_cash_flow"`
+ }
+ 
+ type TransactionsReturn struct {
+@@ -102,13 +108,16 @@ func filterTransactions(raw TransactionsResponse, since time.Time) []FilteredTra
+ 		}
+ 
+ 		transaction := FilteredTransactions{
+-			UUID:           t[i].UUID,
+-			Amount:         t[i].Amount,
+-			Type:           t[i].Type,
+-			Account:        t[i].FinancialInformationProvider.Name,
+-			Merchant:       t[i].Narration,
+-			TxnTimestamp:   t[i].TxnTimestamp,
+-			CurrentBalance: t[i].CurrentBalance,
++			UUID:                 t[i].UUID,
++			Amount:               t[i].Amount,
++			Type:                 t[i].Type,
++			Account:              t[i].FinancialInformationProvider.Name,
++			Merchant:             t[i].Narration,
++			TxnTimestamp:         t[i].TxnTimestamp,
++			CurrentBalance:       t[i].CurrentBalance,
++			Mode:                 t[i].Mode,
++			Reference:            t[i].Reference,
++			ExcludedFromCashFlow: t[i].ExcludedFromCashFlow,
+ 		}
+ 
+ 		// Use Fold's F1 classifier if this transaction was classified
+@@ -116,6 +125,23 @@ func filterTransactions(raw TransactionsResponse, since time.Time) []FilteredTra
+ 			transaction.Merchant = t[i].Merchant.(string)
+ 		}
+ 
++		// Preserve category if available
++		if t[i].Category != nil {
++			transaction.Category = t[i].Category.(string)
++		}
++
++		// Preserve notes if available
++		if t[i].Notes != nil {
++			transaction.Notes = t[i].Notes.(string)
++		}
++
++		// Preserve tags as JSON string if available
++		if t[i].Tags != nil {
++			if tagsBytes, err := json.Marshal(t[i].Tags); err == nil {
++				transaction.Tags = string(tagsBytes)
++			}
++		}
++
+ 		transactions = append(transactions, transaction)
+ 	}
+ 
+diff --git a/cmd/transactions.go b/cmd/transactions.go
+index d3c8580..74b72e9 100644
+--- a/cmd/transactions.go
++++ b/cmd/transactions.go
+@@ -88,13 +88,19 @@ func printTransactions(t api.FilteredTransactions) {
+ 
+ func writeToDb(t api.FilteredTransactions) {
+ 	db.Conn.Clauses(clause.OnConflict{UpdateAll: true}).Create(&db.Transactions{
+-		UUID:           t.UUID,
+-		Timestamp:      t.TxnTimestamp,
+-		Amount:         t.Amount,
+-		Type:           t.Type,
+-		Merchant:       t.Merchant,
+-		CurrentBalance: t.CurrentBalance,
+-		Account:        t.Account,
++		UUID:                 t.UUID,
++		Timestamp:            t.TxnTimestamp,
++		Amount:               t.Amount,
++		Type:                 t.Type,
++		Merchant:             t.Merchant,
++		CurrentBalance:       t.CurrentBalance,
++		Account:              t.Account,
++		Category:             t.Category,
++		Tags:                 t.Tags,
++		Mode:                 t.Mode,
++		Reference:            t.Reference,
++		Notes:                t.Notes,
++		ExcludedFromCashFlow: t.ExcludedFromCashFlow,
+ 	})
+ }
+ 
+diff --git a/db/models.go b/db/models.go
+index 06f0ee5..5aea617 100644
+--- a/db/models.go
++++ b/db/models.go
+@@ -5,11 +5,17 @@ import (
+ )
+ 
+ type Transactions struct {
+-	UUID           string `gorm:"primaryKey;"`
+-	Amount         float64
+-	CurrentBalance float64
+-	Timestamp      time.Time `gorm:"index:sortTimestamp,sort:desc"`
+-	Type           string
+-	Account        string
+-	Merchant       string
++	UUID                 string `gorm:"primaryKey;"`
++	Amount               float64
++	CurrentBalance       float64
++	Timestamp            time.Time `gorm:"index:sortTimestamp,sort:desc"`
++	Type                 string
++	Account              string
++	Merchant             string
++	Category             string
++	Tags                 string
++	Mode                 string
++	Reference            string
++	Notes                string
++	ExcludedFromCashFlow bool
+ }
+
+From 633213801c453705d4a2db8ac968269916c190ed Mon Sep 17 00:00:00 2001
+From: coherent-cache <rbkv2.0@gmail.com>
+Date: Tue, 10 Mar 2026 18:53:52 +0530
+Subject: [PATCH 3/5] Capture enriched v2 API metadata: narration, F1
+ predictions, refunds, contacts, groups
+
+Extend FilteredTransactions, db.Transactions, and writeToDb() to preserve
+11 additional fields from the Fold v2 API that were previously discarded:
+
+- narration: raw bank narration (3,832/3,833 populated, critical for dedup)
+- category_id: stable UUID for Fold categories (38 unique)
+- summary: human-readable transaction summary
+- transaction_id: Fold's internal txn ID
+- is_f1_predicted: whether category/merchant were AI-predicted vs user-set
+- refund_status: IS_REFUNDABLE/REFUNDED/STOP_TRACKING (241 txns)
+- refund_received_on: timestamp for confirmed refunds (76 txns)
+- contact_id: Fold's counterparty linking (45 txns, 19 contacts)
+- group_ids: transaction grouping (23 txns in 2 groups)
+- account_id: Fold's internal account UUID
+
+Also adds personal financial data files (fold_raw_all.json, local.ledger,
+*.sqlite.bak) to .gitignore to prevent accidental exposure.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ .gitignore          |  5 +++++
+ api/transactions.go | 48 +++++++++++++++++++++++++++++++++++++++++++++
+ cmd/transactions.go | 11 +++++++++++
+ db/models.go        | 11 +++++++++++
+ 4 files changed, 75 insertions(+)
+
+diff --git a/.gitignore b/.gitignore
+index 28d2585..d608041 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,6 +1,11 @@
+ ## Workspace related
+ bin/*
+ *.sqlite
++*.sqlite.bak
++
++## Personal financial data (never commit or push)
++fold_raw_all.json
++local.ledger
+ 
+ ## Github
+ # If you prefer the allow list template instead of the deny list, see community template:
+diff --git a/api/transactions.go b/api/transactions.go
+index 264dc04..c22bb78 100644
+--- a/api/transactions.go
++++ b/api/transactions.go
+@@ -29,6 +29,7 @@ type TransactionsResponse struct {
+ 			Type                         string      `json:"type"`
+ 			Narration                    string      `json:"narration"`
+ 			Category                     interface{} `json:"category"`
++			CategoryID                   string      `json:"category_id"`
+ 			CategoryIcon                 interface{} `json:"category_icon"`
+ 			Merchant                     interface{} `json:"merchant"`
+ 			MerchantIcon                 interface{} `json:"merchant_icon"`
+@@ -59,6 +60,7 @@ type TransactionsResponse struct {
+ 			Receipts             []interface{} `json:"receipts"`
+ 			GroupIds             interface{}   `json:"group_ids"`
+ 			ContactID            interface{}   `json:"contact_id"`
++			IsF1Predicted        interface{}   `json:"is_f1_predicted"`
+ 		} `json:"transactions"`
+ 		Counts []struct {
+ 			Date              string `json:"date"`
+@@ -80,13 +82,24 @@ type FilteredTransactions struct {
+ 	TxnTimestamp         time.Time `json:"txn_timestamp"`
+ 	Type                 string    `json:"type"`
+ 	Account              string    `json:"account"`
++	AccountID            string    `json:"account_id"`
+ 	Merchant             string    `json:"merchant"`
++	Narration            string    `json:"narration"`
+ 	Category             string    `json:"category"`
++	CategoryID           string    `json:"category_id"`
+ 	Tags                 string    `json:"tags"`
+ 	Mode                 string    `json:"mode"`
+ 	Reference            string    `json:"reference"`
+ 	Notes                string    `json:"notes"`
+ 	ExcludedFromCashFlow bool      `json:"excluded_from_cash_flow"`
++	Summary              string    `json:"summary"`
++	TransactionID        string    `json:"transaction_id"`
++	RefundStatus         string    `json:"refund_status"`
++	RefundReceivedOn     string    `json:"refund_received_on"`
++	ContactID            string    `json:"contact_id"`
++	GroupIDs             string    `json:"group_ids"`
++	F1PredictedCategory  bool      `json:"f1_predicted_category"`
++	F1PredictedMerchant  bool      `json:"f1_predicted_merchant"`
+ }
+ 
+ type TransactionsReturn struct {
+@@ -112,12 +125,17 @@ func filterTransactions(raw TransactionsResponse, since time.Time) []FilteredTra
+ 			Amount:               t[i].Amount,
+ 			Type:                 t[i].Type,
+ 			Account:              t[i].FinancialInformationProvider.Name,
++			AccountID:            t[i].AccountID,
+ 			Merchant:             t[i].Narration,
++			Narration:            t[i].Narration,
+ 			TxnTimestamp:         t[i].TxnTimestamp,
+ 			CurrentBalance:       t[i].CurrentBalance,
+ 			Mode:                 t[i].Mode,
+ 			Reference:            t[i].Reference,
+ 			ExcludedFromCashFlow: t[i].ExcludedFromCashFlow,
++			Summary:              t[i].Summary,
++			TransactionID:        t[i].TransactionID,
++			RefundStatus:         t[i].RefundStatus,
+ 		}
+ 
+ 		// Use Fold's F1 classifier if this transaction was classified
+@@ -130,6 +148,9 @@ func filterTransactions(raw TransactionsResponse, since time.Time) []FilteredTra
+ 			transaction.Category = t[i].Category.(string)
+ 		}
+ 
++		// Preserve category_id (always a string, not interface{})
++		transaction.CategoryID = t[i].CategoryID
++
+ 		// Preserve notes if available
+ 		if t[i].Notes != nil {
+ 			transaction.Notes = t[i].Notes.(string)
+@@ -142,6 +163,33 @@ func filterTransactions(raw TransactionsResponse, since time.Time) []FilteredTra
+ 			}
+ 		}
+ 
++		// Preserve refund_received_on if available
++		if t[i].RefundReceivedOn != nil {
++			transaction.RefundReceivedOn = t[i].RefundReceivedOn.(string)
++		}
++
++		// Preserve contact_id if available
++		if t[i].ContactID != nil {
++			transaction.ContactID = t[i].ContactID.(string)
++		}
++
++		// Preserve group_ids as JSON string if available
++		if t[i].GroupIds != nil {
++			if gidBytes, err := json.Marshal(t[i].GroupIds); err == nil {
++				transaction.GroupIDs = string(gidBytes)
++			}
++		}
++
++		// Preserve F1 prediction flags
++		if pred, ok := t[i].IsF1Predicted.(map[string]interface{}); ok {
++			if v, ok := pred["category_or_subcategory"].(bool); ok {
++				transaction.F1PredictedCategory = v
++			}
++			if v, ok := pred["merchant"].(bool); ok {
++				transaction.F1PredictedMerchant = v
++			}
++		}
++
+ 		transactions = append(transactions, transaction)
+ 	}
+ 
+diff --git a/cmd/transactions.go b/cmd/transactions.go
+index 74b72e9..51f1248 100644
+--- a/cmd/transactions.go
++++ b/cmd/transactions.go
+@@ -93,14 +93,25 @@ func writeToDb(t api.FilteredTransactions) {
+ 		Amount:               t.Amount,
+ 		Type:                 t.Type,
+ 		Merchant:             t.Merchant,
++		Narration:            t.Narration,
+ 		CurrentBalance:       t.CurrentBalance,
+ 		Account:              t.Account,
++		AccountID:            t.AccountID,
+ 		Category:             t.Category,
++		CategoryID:           t.CategoryID,
+ 		Tags:                 t.Tags,
+ 		Mode:                 t.Mode,
+ 		Reference:            t.Reference,
+ 		Notes:                t.Notes,
+ 		ExcludedFromCashFlow: t.ExcludedFromCashFlow,
++		Summary:              t.Summary,
++		TransactionID:        t.TransactionID,
++		RefundStatus:         t.RefundStatus,
++		RefundReceivedOn:     t.RefundReceivedOn,
++		ContactID:            t.ContactID,
++		GroupIDs:             t.GroupIDs,
++		F1PredictedCategory:  t.F1PredictedCategory,
++		F1PredictedMerchant:  t.F1PredictedMerchant,
+ 	})
+ }
+ 
+diff --git a/db/models.go b/db/models.go
+index 5aea617..4010a75 100644
+--- a/db/models.go
++++ b/db/models.go
+@@ -12,10 +12,21 @@ type Transactions struct {
+ 	Type                 string
+ 	Account              string
+ 	Merchant             string
++	Narration            string
+ 	Category             string
++	CategoryID           string
+ 	Tags                 string
+ 	Mode                 string
+ 	Reference            string
+ 	Notes                string
+ 	ExcludedFromCashFlow bool
++	Summary              string
++	TransactionID        string
++	RefundStatus         string
++	RefundReceivedOn     string
++	ContactID            string
++	GroupIDs             string
++	F1PredictedCategory  bool
++	F1PredictedMerchant  bool
++	AccountID            string
+ }
+
+From 9b5770709d351ecb3f09102ed80a993f921f5e1b Mon Sep 17 00:00:00 2001
+From: coherent-cache <rbkv2.0@gmail.com>
+Date: Tue, 10 Mar 2026 21:34:49 +0530
+Subject: [PATCH 4/5] Capture Fold subcategory (category_icon_name) as 2nd-tier
+ classification
+
+Fold's API returns a 2-tier category system: top-level `category` (e.g.,
+"Transport") and `category_icon_name` (e.g., "Fuel", "Bus", "Cab"). This
+adds the subcategory field to the response struct, filtered transactions,
+DB model, and write-to-DB path. GORM AutoMigrate adds the column on first
+run.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ api/transactions.go | 5 +++++
+ cmd/transactions.go | 1 +
+ db/models.go        | 1 +
+ 3 files changed, 7 insertions(+)
+
+diff --git a/api/transactions.go b/api/transactions.go
+index c22bb78..ef41d65 100644
+--- a/api/transactions.go
++++ b/api/transactions.go
+@@ -31,6 +31,7 @@ type TransactionsResponse struct {
+ 			Category                     interface{} `json:"category"`
+ 			CategoryID                   string      `json:"category_id"`
+ 			CategoryIcon                 interface{} `json:"category_icon"`
++			CategoryIconName             string      `json:"category_icon_name"`
+ 			Merchant                     interface{} `json:"merchant"`
+ 			MerchantIcon                 interface{} `json:"merchant_icon"`
+ 			MerchantAddress              interface{} `json:"merchant_address"`
+@@ -87,6 +88,7 @@ type FilteredTransactions struct {
+ 	Narration            string    `json:"narration"`
+ 	Category             string    `json:"category"`
+ 	CategoryID           string    `json:"category_id"`
++	Subcategory          string    `json:"subcategory"`
+ 	Tags                 string    `json:"tags"`
+ 	Mode                 string    `json:"mode"`
+ 	Reference            string    `json:"reference"`
+@@ -151,6 +153,9 @@ func filterTransactions(raw TransactionsResponse, since time.Time) []FilteredTra
+ 		// Preserve category_id (always a string, not interface{})
+ 		transaction.CategoryID = t[i].CategoryID
+ 
++		// Preserve subcategory (category_icon_name) — Fold's 2nd-tier classification
++		transaction.Subcategory = t[i].CategoryIconName
++
+ 		// Preserve notes if available
+ 		if t[i].Notes != nil {
+ 			transaction.Notes = t[i].Notes.(string)
+diff --git a/cmd/transactions.go b/cmd/transactions.go
+index 51f1248..914520d 100644
+--- a/cmd/transactions.go
++++ b/cmd/transactions.go
+@@ -99,6 +99,7 @@ func writeToDb(t api.FilteredTransactions) {
+ 		AccountID:            t.AccountID,
+ 		Category:             t.Category,
+ 		CategoryID:           t.CategoryID,
++		Subcategory:          t.Subcategory,
+ 		Tags:                 t.Tags,
+ 		Mode:                 t.Mode,
+ 		Reference:            t.Reference,
+diff --git a/db/models.go b/db/models.go
+index 4010a75..1110823 100644
+--- a/db/models.go
++++ b/db/models.go
+@@ -15,6 +15,7 @@ type Transactions struct {
+ 	Narration            string
+ 	Category             string
+ 	CategoryID           string
++	Subcategory          string
+ 	Tags                 string
+ 	Mode                 string
+ 	Reference            string
+
+From cc1a81a8bd72d44757a8b967994803bc1db9a8d5 Mon Sep 17 00:00:00 2001
+From: coherent-cache <rbkv2.0@gmail.com>
+Date: Tue, 10 Mar 2026 23:19:03 +0530
+Subject: [PATCH 5/5] Capture remaining Fold API fields: merchant_address,
+ kind, bookmarks, via
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Store all available Fold v2 API transaction fields locally for future
+analysis. Adds merchant_address (physical location, sparse), kind
+(transaction type), is_bookmarked, before_fold_account (pre-Fold
+historical flag), via (payment intermediary), and account_in.
+
+Schema now captures 31 columns — all non-visual API fields preserved.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+---
+ api/transactions.go | 28 ++++++++++++++++++++++++++++
+ cmd/transactions.go |  6 ++++++
+ db/models.go        |  6 ++++++
+ 3 files changed, 40 insertions(+)
+
+diff --git a/api/transactions.go b/api/transactions.go
+index ef41d65..ace5438 100644
+--- a/api/transactions.go
++++ b/api/transactions.go
+@@ -85,19 +85,25 @@ type FilteredTransactions struct {
+ 	Account              string    `json:"account"`
+ 	AccountID            string    `json:"account_id"`
+ 	Merchant             string    `json:"merchant"`
++	MerchantAddress      string    `json:"merchant_address"`
+ 	Narration            string    `json:"narration"`
+ 	Category             string    `json:"category"`
+ 	CategoryID           string    `json:"category_id"`
+ 	Subcategory          string    `json:"subcategory"`
+ 	Tags                 string    `json:"tags"`
++	Kind                 string    `json:"kind"`
+ 	Mode                 string    `json:"mode"`
+ 	Reference            string    `json:"reference"`
+ 	Notes                string    `json:"notes"`
+ 	ExcludedFromCashFlow bool      `json:"excluded_from_cash_flow"`
++	IsBookmarked         bool      `json:"is_bookmarked"`
+ 	Summary              string    `json:"summary"`
+ 	TransactionID        string    `json:"transaction_id"`
+ 	RefundStatus         string    `json:"refund_status"`
+ 	RefundReceivedOn     string    `json:"refund_received_on"`
++	BeforeFoldAccount    bool      `json:"before_fold_account"`
++	Via                  string    `json:"via"`
++	AccountIn            string    `json:"account_in"`
+ 	ContactID            string    `json:"contact_id"`
+ 	GroupIDs             string    `json:"group_ids"`
+ 	F1PredictedCategory  bool      `json:"f1_predicted_category"`
+@@ -132,12 +138,15 @@ func filterTransactions(raw TransactionsResponse, since time.Time) []FilteredTra
+ 			Narration:            t[i].Narration,
+ 			TxnTimestamp:         t[i].TxnTimestamp,
+ 			CurrentBalance:       t[i].CurrentBalance,
++			Kind:                 t[i].Kind,
+ 			Mode:                 t[i].Mode,
+ 			Reference:            t[i].Reference,
+ 			ExcludedFromCashFlow: t[i].ExcludedFromCashFlow,
++			IsBookmarked:         t[i].IsBookmarked,
+ 			Summary:              t[i].Summary,
+ 			TransactionID:        t[i].TransactionID,
+ 			RefundStatus:         t[i].RefundStatus,
++			BeforeFoldAccount:    t[i].BeforeFoldAccount,
+ 		}
+ 
+ 		// Use Fold's F1 classifier if this transaction was classified
+@@ -156,6 +165,25 @@ func filterTransactions(raw TransactionsResponse, since time.Time) []FilteredTra
+ 		// Preserve subcategory (category_icon_name) — Fold's 2nd-tier classification
+ 		transaction.Subcategory = t[i].CategoryIconName
+ 
++		// Preserve merchant_address if available
++		if t[i].MerchantAddress != nil {
++			transaction.MerchantAddress = t[i].MerchantAddress.(string)
++		}
++
++		// Preserve via if available
++		if t[i].Via != nil {
++			if viaBytes, err := json.Marshal(t[i].Via); err == nil {
++				transaction.Via = string(viaBytes)
++			}
++		}
++
++		// Preserve account_in if available
++		if t[i].AccountIn != nil {
++			if aiBytes, err := json.Marshal(t[i].AccountIn); err == nil {
++				transaction.AccountIn = string(aiBytes)
++			}
++		}
++
+ 		// Preserve notes if available
+ 		if t[i].Notes != nil {
+ 			transaction.Notes = t[i].Notes.(string)
+diff --git a/cmd/transactions.go b/cmd/transactions.go
+index 914520d..078762d 100644
+--- a/cmd/transactions.go
++++ b/cmd/transactions.go
+@@ -93,6 +93,7 @@ func writeToDb(t api.FilteredTransactions) {
+ 		Amount:               t.Amount,
+ 		Type:                 t.Type,
+ 		Merchant:             t.Merchant,
++		MerchantAddress:      t.MerchantAddress,
+ 		Narration:            t.Narration,
+ 		CurrentBalance:       t.CurrentBalance,
+ 		Account:              t.Account,
+@@ -101,14 +102,19 @@ func writeToDb(t api.FilteredTransactions) {
+ 		CategoryID:           t.CategoryID,
+ 		Subcategory:          t.Subcategory,
+ 		Tags:                 t.Tags,
++		Kind:                 t.Kind,
+ 		Mode:                 t.Mode,
+ 		Reference:            t.Reference,
+ 		Notes:                t.Notes,
+ 		ExcludedFromCashFlow: t.ExcludedFromCashFlow,
++		IsBookmarked:         t.IsBookmarked,
+ 		Summary:              t.Summary,
+ 		TransactionID:        t.TransactionID,
+ 		RefundStatus:         t.RefundStatus,
+ 		RefundReceivedOn:     t.RefundReceivedOn,
++		BeforeFoldAccount:    t.BeforeFoldAccount,
++		Via:                  t.Via,
++		AccountIn:            t.AccountIn,
+ 		ContactID:            t.ContactID,
+ 		GroupIDs:             t.GroupIDs,
+ 		F1PredictedCategory:  t.F1PredictedCategory,
+diff --git a/db/models.go b/db/models.go
+index 1110823..165f0cf 100644
+--- a/db/models.go
++++ b/db/models.go
+@@ -12,19 +12,25 @@ type Transactions struct {
+ 	Type                 string
+ 	Account              string
+ 	Merchant             string
++	MerchantAddress      string
+ 	Narration            string
+ 	Category             string
+ 	CategoryID           string
+ 	Subcategory          string
+ 	Tags                 string
++	Kind                 string
+ 	Mode                 string
+ 	Reference            string
+ 	Notes                string
+ 	ExcludedFromCashFlow bool
++	IsBookmarked         bool
+ 	Summary              string
+ 	TransactionID        string
+ 	RefundStatus         string
+ 	RefundReceivedOn     string
++	BeforeFoldAccount    bool
++	Via                  string
++	AccountIn            string
+ 	ContactID            string
+ 	GroupIDs             string
+ 	F1PredictedCategory  bool

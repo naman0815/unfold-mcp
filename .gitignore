@@ -1,1 +1,9 @@
 .worktrees/
+db.sqlite
+tx.log
+node_modules/
+fold-mcp/build/
+fold-mcp/node_modules/
+unfold_patched
+.superpowers/
+
