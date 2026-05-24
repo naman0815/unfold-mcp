@@ -28,7 +28,7 @@ func refreshCmdHandler(cmd *cobra.Command, args []string) {
 
 	viper.Set("token.access", access)
 	viper.Set("token.refresh", refresh)
-	// viper.WriteConfig()
+	viper.WriteConfig()
 
 	fmt.Println("Refreshed auth tokens !")
 }

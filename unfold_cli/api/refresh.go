@@ -67,6 +67,7 @@ func RefreshOrFail() {
 
 	viper.Set("token.access", access)
 	viper.Set("token.refresh", refresh)
+	viper.WriteConfig() // persist new tokens so the next process start uses them
 
 	log.Debug().Msg("Refreshed tokens")
 }
