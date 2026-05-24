@@ -1,33 +1,58 @@
 # Fold AI — Zero-Touch Setup Guide for Claude Code
 
-This guide provides an incredibly simple, automated way for anyone to set up their own local Fold AI companion. All they need to do is open Claude Code in an empty folder and paste a single prompt!
+All your friend needs to do is:
+1. Create a new empty folder on their Mac.
+2. Open **Claude Code** (or Antigravity) inside that folder.
+3. Paste the prompt below. That's it.
 
 ---
 
-## 🚀 The Zero-Touch Setup Prompt (For Your Friend)
+## 🚀 Zero-Touch Setup Prompt (Paste This Into Claude Code)
 
-Have your friend create a new empty directory on their Mac, launch **Claude Code** (or Antigravity) inside that directory, and copy-paste the exact prompt below:
+```
+I want to set up my personal local Fold AI expense companion from scratch. Automate the entire setup end-to-end with no manual steps.
 
-```markdown
-I want to set up my personal local Fold AI expense companion from scratch. Please automate the entire setup end-to-end.
+Step 1 — Clone the repository into the current directory:
+  git clone https://github.com/naman0815/fold-mcp .
 
-Here is what you should do:
-1. Clone the Fold AI repository into the current directory:
-   git clone https://github.com/naman0815/fold-mcp .
+Step 2 — Check dependencies. Verify that Node.js and Go are installed.
+  If Node.js is missing, instruct me to install it from https://nodejs.org
+  If Go is missing, instruct me to install it from https://golang.org/dl
 
-2. Verify system dependencies (ensure Node.js and Go are installed).
-3. Build the MCP server by running `npm install` and `npm run build` inside the `fold-mcp` folder.
-4. Build the Go CLI by compiling `unfold_cli` to `unfold_patched` in the root folder.
-5. Auto-detect the path to my Claude Desktop configuration file and write the MCP server configuration for the `fold` server pointing to `fold-mcp/build/index.js` under the absolute path of this directory.
-6. Guide me through retrieving my personal Fold API credentials/headers (such as from my mobile app proxies or session cookies) and how to configure them so the sync tool works.
-7. Once I provide the credentials, help me perform the initial sync from the beginning of my Fold usage (e.g. using `sync_fold_data(since="2015-01-01")`).
+Step 3 — Build the MCP server:
+  cd fold-mcp && npm install && npm run build && cd ..
+
+Step 4 — Build the Go CLI (the unfold_cli tool that authenticates with Fold):
+  cd unfold_cli && go build -o ../unfold_patched . && cd ..
+
+Step 5 — Log in to my Fold account using the unfold CLI:
+  Run: ./unfold_patched login
+  It will prompt me for my Indian phone number (without +91) and then send an OTP to my phone.
+  Enter the OTP when prompted. This stores my session token in ~/.config/unfold/config.yaml.
+
+Step 6 — Configure Claude Desktop to use this MCP server:
+  Find my Claude Desktop config file at:
+    ~/Library/Application Support/Claude/claude_desktop_config.json
+  Add this entry under "mcpServers" (replace <ABSOLUTE_PATH> with the full path to this directory):
+  {
+    "fold": {
+      "command": "node",
+      "args": ["<ABSOLUTE_PATH>/fold-mcp/build/index.js"]
+    }
+  }
+
+Step 7 — Perform the initial sync of all my Fold transaction history:
+  Tell me to open Claude Desktop (restart it if already open) and ask it to:
+  "Sync my Fold data from 2015-01-01"
+  This will populate my local db.sqlite with all my historical transactions.
 
 Let's begin!
 ```
 
 ---
 
-## 🔒 Security & Privacy Notes
+## 🔒 How Auth & Privacy Works
 
-- **100% Local**: No transaction data or SQLite databases are ever shared or committed to GitHub.
-- **Isolate Databases**: Since SQLite database files run locally on your own machine, your friends' database files will remain 100% isolated on their physical computers, even though you share the same Claude account or repository.
+- **Auth**: The `unfold_patched` CLI uses your Indian phone number + OTP (sent by Fold) to authenticate. No passwords. Tokens are stored locally in `~/.config/unfold/config.yaml` on your own machine.
+- **Data Isolation**: Your transactions are stored in `db.sqlite` inside your local folder — never committed to GitHub (it's in `.gitignore`), never shared with anyone else.
+- **Tokens are personal**: Even if two friends share the same GitHub repo, each person logs in separately with their own phone number and gets their own tokens and their own local database.
