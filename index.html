@@ -1,0 +1,992 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Fold AI">
+  <link rel="manifest" href="manifest.json">
+  <title>Fold Companion</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Sora:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0e0f11;
+      --surface: #16181c;
+      --surface2: #1e2026;
+      --border: rgba(255,255,255,0.07);
+      --border-bright: rgba(255,255,255,0.14);
+      --text: #e8e9eb;
+      --text-muted: #7a7d85;
+      --text-dim: #4a4d55;
+      --accent: #5cdb95;
+      --accent-dim: rgba(92,219,149,0.12);
+      --accent-glow: rgba(92,219,149,0.25);
+      --user-bubble: #1e2a22;
+      --user-border: rgba(92,219,149,0.2);
+      --danger: #ff6b6b;
+      --warning: #ffd166;
+      --mono: 'DM Mono', monospace;
+      --sans: 'Sora', sans-serif;
+      --radius: 14px;
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%; height: 100dvh;
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      overflow: hidden;
+    }
+
+    /* Layout shell */
+    .app {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      max-width: 680px;
+      margin: 0 auto;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px 14px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+      position: relative;
+      z-index: 10;
+      flex-shrink: 0;
+    }
+
+    .header-left { display: flex; align-items: center; gap: 10px; }
+
+    .logo-dot {
+      width: 28px; height: 28px;
+      background: var(--accent);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px;
+    }
+
+    .header-title { font-size: 15px; font-weight: 600; letter-spacing: -0.02em; }
+    .header-sub { font-size: 11px; color: var(--text-muted); font-family: var(--mono); margin-top: 1px; }
+
+    .header-right { display: flex; align-items: center; gap: 8px; }
+
+    .status-pill {
+      display: flex; align-items: center; gap: 5px;
+      padding: 4px 10px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      font-size: 11px;
+      font-family: var(--mono);
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .status-pill:hover { border-color: var(--border-bright); color: var(--text); }
+    .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-dim); }
+    .status-dot.connected { background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); }
+
+    .icon-btn {
+      width: 32px; height: 32px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer;
+      color: var(--text-muted);
+      font-size: 16px;
+      transition: all 0.15s;
+    }
+    .icon-btn:hover { border-color: var(--border-bright); color: var(--text); }
+
+    /* Panels */
+    .panels { display: flex; flex: 1; overflow: hidden; position: relative; }
+
+    /* Settings panel (slides in) */
+    .settings-panel {
+      position: absolute; top: 0; right: 0;
+      width: min(340px, 100%);
+      height: 100%;
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      z-index: 20;
+      transform: translateX(100%);
+      transition: transform 0.25s cubic-bezier(0.4,0,0.2,1);
+      display: flex; flex-direction: column;
+      overflow-y: auto;
+    }
+    .settings-panel.open { transform: translateX(0); }
+
+    .settings-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 20px;
+      border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; background: var(--surface); z-index: 1;
+    }
+    .settings-title { font-size: 14px; font-weight: 600; }
+
+    .settings-body { padding: 20px; display: flex; flex-direction: column; gap: 20px; flex: 1; }
+
+    .field label {
+      display: block;
+      font-size: 11px; font-family: var(--mono); color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.05em;
+      margin-bottom: 6px;
+    }
+    .field input, .field textarea, .field select {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 12px;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .field input:focus, .field textarea:focus, .field select:focus {
+      border-color: var(--accent);
+    }
+    .field input[type="password"] { letter-spacing: 0.1em; }
+    .field textarea { resize: vertical; min-height: 80px; }
+    .field select option { background: var(--surface2); }
+
+    .field-hint { font-size: 11px; color: var(--text-dim); margin-top: 5px; font-family: var(--mono); }
+
+    .btn {
+      padding: 9px 16px;
+      border-radius: 8px;
+      font-family: var(--sans);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      transition: all 0.15s;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #0e0f11;
+    }
+    .btn-primary:hover { background: #6ee8a5; }
+    .btn-secondary {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { border-color: var(--border-bright); }
+    .btn-danger {
+      background: transparent;
+      color: var(--danger);
+      border: 1px solid rgba(255,107,107,0.3);
+    }
+    .btn-danger:hover { background: rgba(255,107,107,0.08); }
+
+    .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    .divider { height: 1px; background: var(--border); }
+
+    /* Stats bar */
+    .stats-bar {
+      display: flex;
+      gap: 1px;
+      background: var(--border);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .stat-cell {
+      flex: 1;
+      padding: 10px 14px;
+      background: var(--bg);
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .stat-cell:hover { background: var(--surface); }
+    .stat-label { font-size: 10px; font-family: var(--mono); color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; }
+    .stat-value { font-size: 16px; font-weight: 600; font-family: var(--mono); margin-top: 2px; color: var(--text); }
+    .stat-value.positive { color: var(--accent); }
+    .stat-value.negative { color: var(--danger); }
+    .stat-value.loading { color: var(--text-dim); font-size: 12px; }
+
+    /* Chat area */
+    .chat-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      scroll-behavior: smooth;
+    }
+    .messages::-webkit-scrollbar { width: 4px; }
+    .messages::-webkit-scrollbar-track { background: transparent; }
+    .messages::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 2px; }
+
+    /* Empty state */
+    .empty-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 40px 20px;
+      text-align: center;
+    }
+    .empty-icon { font-size: 36px; }
+    .empty-title { font-size: 18px; font-weight: 600; }
+    .empty-sub { font-size: 13px; color: var(--text-muted); max-width: 260px; line-height: 1.6; }
+
+    .suggestions {
+      display: flex; flex-wrap: wrap; gap: 8px;
+      justify-content: center;
+      margin-top: 8px;
+    }
+    .suggestion {
+      padding: 7px 13px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      font-size: 12px;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.15s;
+      font-family: var(--mono);
+    }
+    .suggestion:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: var(--accent-dim);
+    }
+
+    /* Message bubbles */
+    .msg { display: flex; flex-direction: column; gap: 4px; max-width: 100%; }
+
+    .msg-user { align-items: flex-end; }
+    .msg-ai { align-items: flex-start; }
+
+    .bubble {
+      padding: 12px 16px;
+      border-radius: var(--radius);
+      font-size: 14px;
+      line-height: 1.65;
+      max-width: 85%;
+    }
+    .bubble-user {
+      background: var(--user-bubble);
+      border: 1px solid var(--user-border);
+      border-radius: var(--radius) var(--radius) 4px var(--radius);
+      color: var(--text);
+    }
+    .bubble-ai {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius) var(--radius) var(--radius) 4px;
+      color: var(--text);
+    }
+
+    .bubble p { margin-bottom: 10px; }
+    .bubble p:last-child { margin-bottom: 0; }
+    .bubble ul, .bubble ol { padding-left: 18px; margin: 6px 0; }
+    .bubble li { margin-bottom: 4px; }
+    .bubble strong { color: var(--accent); font-weight: 500; }
+    .bubble code {
+      font-family: var(--mono); font-size: 12px;
+      background: var(--bg); border: 1px solid var(--border);
+      padding: 1px 5px; border-radius: 4px;
+    }
+    .bubble .amount {
+      font-family: var(--mono);
+      color: var(--warning);
+    }
+
+    .msg-meta {
+      font-size: 10px; font-family: var(--mono);
+      color: var(--text-dim);
+      padding: 0 4px;
+    }
+
+    /* Typing indicator */
+    .typing-indicator { display: flex; align-items: center; gap: 4px; padding: 14px 16px; }
+    .typing-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--accent);
+      animation: typing-bounce 1.2s ease infinite;
+    }
+    .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes typing-bounce {
+      0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+      30% { transform: translateY(-6px); opacity: 1; }
+    }
+
+    /* Input bar */
+    .input-bar {
+      padding: 12px 16px;
+      padding-bottom: max(12px, var(--safe-bottom));
+      border-top: 1px solid var(--border);
+      background: var(--bg);
+      flex-shrink: 0;
+    }
+
+    .input-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 6px 6px 6px 14px;
+      transition: border-color 0.15s;
+    }
+    .input-row:focus-within { border-color: var(--border-bright); }
+
+    #chat-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      font-family: var(--sans);
+      font-size: 14px;
+      color: var(--text);
+      resize: none;
+      max-height: 120px;
+      line-height: 1.5;
+      padding: 5px 0;
+    }
+    #chat-input::placeholder { color: var(--text-dim); }
+
+    .send-btn {
+      width: 34px; height: 34px;
+      border-radius: 8px;
+      background: var(--accent);
+      border: none;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.15s;
+      flex-shrink: 0;
+    }
+    .send-btn:hover { background: #6ee8a5; }
+    .send-btn:disabled { background: var(--surface2); cursor: not-allowed; }
+    .send-btn svg { width: 16px; height: 16px; }
+
+    /* Fetch btn row below input */
+    .quick-actions {
+      display: flex; gap: 6px; margin-top: 8px;
+    }
+    .quick-btn {
+      padding: 5px 10px;
+      font-size: 11px; font-family: var(--mono);
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .quick-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* Toast */
+    .toast {
+      position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%) translateY(10px);
+      background: var(--surface2);
+      border: 1px solid var(--border-bright);
+      border-radius: 8px;
+      padding: 8px 16px;
+      font-size: 12px; font-family: var(--mono);
+      color: var(--text);
+      opacity: 0;
+      transition: all 0.2s;
+      z-index: 100;
+      white-space: nowrap;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* Scrollbar for settings */
+    .settings-panel::-webkit-scrollbar { width: 4px; }
+    .settings-panel::-webkit-scrollbar-track { background: transparent; }
+    .settings-panel::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 2px; }
+  </style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <div class="logo-dot">₹</div>
+      <div>
+        <div class="header-title">Fold Companion</div>
+        <div class="header-sub" id="data-range">no data loaded</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="status-pill" onclick="syncExpenses()" title="Click to sync">
+        <div class="status-dot" id="conn-dot"></div>
+        <span id="conn-label">sync</span>
+      </div>
+      <div class="icon-btn" onclick="toggleSettings()" title="Settings">⚙</div>
+    </div>
+  </div>
+
+  <!-- Stats bar -->
+  <div class="stats-bar" id="stats-bar" style="display:none">
+    <div class="stat-cell" onclick="askAbout('Give me a breakdown of my spending this month by category.')">
+      <div class="stat-label">this month</div>
+      <div class="stat-value negative" id="stat-month">—</div>
+    </div>
+    <div class="stat-cell" onclick="askAbout('What did I spend most on last week?')">
+      <div class="stat-label">last 7 days</div>
+      <div class="stat-value" id="stat-week">—</div>
+    </div>
+    <div class="stat-cell" onclick="askAbout('Which merchant do I spend the most at overall?')">
+      <div class="stat-label">transactions</div>
+      <div class="stat-value" id="stat-count">—</div>
+    </div>
+  </div>
+
+  <!-- Panels -->
+  <div class="panels">
+
+    <!-- Chat main -->
+    <div class="chat-main">
+
+      <!-- Empty state -->
+      <div class="empty-state" id="empty-state">
+        <div class="empty-icon">📊</div>
+        <div class="empty-title">Fold Companion</div>
+        <div class="empty-sub">Connect to your local unfold server, then ask anything about your expenses.</div>
+        <div class="suggestions" id="suggestions">
+          <div class="suggestion" onclick="askAbout('How much did I spend this month?')">this month total</div>
+          <div class="suggestion" onclick="askAbout('What are my top 5 spending categories?')">top categories</div>
+          <div class="suggestion" onclick="askAbout('Show me my daily average spend.')">daily average</div>
+          <div class="suggestion" onclick="askAbout('Which day of the week do I spend the most?')">spending patterns</div>
+          <div class="suggestion" onclick="askAbout('List subscriptions or recurring expenses.')">subscriptions</div>
+          <div class="suggestion" onclick="askAbout('Compare my spending last month vs this month.')">month comparison</div>
+        </div>
+      </div>
+
+      <!-- Messages -->
+      <div class="messages" id="messages" style="display:none"></div>
+
+    </div>
+
+    <!-- Settings panel -->
+    <div class="settings-panel" id="settings-panel">
+      <div class="settings-header">
+        <div class="settings-title">Settings</div>
+        <div class="icon-btn" onclick="toggleSettings()">✕</div>
+      </div>
+      <div class="settings-body">
+
+        <div class="field">
+          <label>Claude API key</label>
+          <input type="password" id="api-key" placeholder="sk-ant-..." value="">
+          <div class="field-hint">Stored in localStorage only. Never sent anywhere except api.anthropic.com.</div>
+        </div>
+
+        <div class="field">
+          <label>unfold server URL</label>
+          <input type="text" id="server-url" placeholder="http://localhost:5000" value="http://localhost:5000">
+          <div class="field-hint">Run the unfold server locally. See README for setup.</div>
+        </div>
+
+        <div class="field">
+          <label>unfold API path</label>
+          <input type="text" id="api-path" placeholder="/transactions" value="/transactions">
+          <div class="field-hint">Endpoint that returns your transactions JSON.</div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="field">
+          <label>System prompt (optional)</label>
+          <textarea id="system-prompt" placeholder="e.g. Always show amounts in INR. Focus on UPI transactions..."></textarea>
+        </div>
+
+        <div class="field">
+          <label>Data window</label>
+          <select id="data-window">
+            <option value="30">Last 30 days</option>
+            <option value="60">Last 60 days</option>
+            <option value="90">Last 90 days</option>
+            <option value="0">All time</option>
+          </select>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="saveSettings()">Save</button>
+          <button class="btn btn-secondary" onclick="syncExpenses()">Sync now</button>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="field">
+          <label>Cached transactions</label>
+          <div id="cache-info" style="font-size:12px;font-family:var(--mono);color:var(--text-muted);margin-top:4px;">—</div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-danger" onclick="clearCache()">Clear cache</button>
+          <button class="btn btn-danger" onclick="clearChat()">Clear chat</button>
+        </div>
+
+        <div class="divider"></div>
+
+        <div style="font-size:11px;color:var(--text-dim);font-family:var(--mono);line-height:1.8">
+          <div>unfold project: <a href="https://github.com/wantguns/unfold" target="_blank" style="color:var(--accent)">wantguns/unfold</a></div>
+          <div>data stays local · open source</div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Input bar -->
+  <div class="input-bar">
+    <div class="input-row">
+      <textarea id="chat-input" placeholder="Ask about your expenses…" rows="1"
+        onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+      <button class="send-btn" id="send-btn" onclick="sendMessage()" title="Send">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2 8h12M9 3l5 5-5 5"/>
+        </svg>
+      </button>
+    </div>
+    <div class="quick-actions">
+      <button class="quick-btn" onclick="syncExpenses()">⟳ sync</button>
+      <button class="quick-btn" onclick="askAbout('Give me a full spending summary.')">summary</button>
+      <button class="quick-btn" onclick="askAbout('What are unusual or large transactions this month?')">anomalies</button>
+      <button class="quick-btn" onclick="clearChat()">clear</button>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────────────
+let transactions = [];
+let chatHistory = [];
+let isLoading = false;
+
+// ── Settings ─────────────────────────────────────────────────────────────────
+function getSettings() {
+  return {
+    apiKey:     localStorage.getItem('fc_api_key') || '',
+    serverUrl:  localStorage.getItem('fc_server_url') || 'http://localhost:5000',
+    apiPath:    localStorage.getItem('fc_api_path') || '/transactions',
+    systemPrompt: localStorage.getItem('fc_system_prompt') || '',
+    dataWindow: parseInt(localStorage.getItem('fc_data_window') || '30'),
+  };
+}
+
+function loadSettingsUI() {
+  const s = getSettings();
+  document.getElementById('api-key').value = s.apiKey;
+  document.getElementById('server-url').value = s.serverUrl;
+  document.getElementById('api-path').value = s.apiPath;
+  document.getElementById('system-prompt').value = s.systemPrompt;
+  document.getElementById('data-window').value = String(s.dataWindow);
+}
+
+function saveSettings() {
+  const s = {
+    apiKey:    document.getElementById('api-key').value.trim(),
+    serverUrl: document.getElementById('server-url').value.trim(),
+    apiPath:   document.getElementById('api-path').value.trim(),
+    systemPrompt: document.getElementById('system-prompt').value.trim(),
+    dataWindow: document.getElementById('data-window').value,
+  };
+  localStorage.setItem('fc_api_key', s.apiKey);
+  localStorage.setItem('fc_server_url', s.serverUrl);
+  localStorage.setItem('fc_api_path', s.apiPath);
+  localStorage.setItem('fc_system_prompt', s.systemPrompt);
+  localStorage.setItem('fc_data_window', s.dataWindow);
+  toast('Settings saved');
+  toggleSettings();
+}
+
+// ── Settings Panel ────────────────────────────────────────────────────────────
+function toggleSettings() {
+  const p = document.getElementById('settings-panel');
+  p.classList.toggle('open');
+  if (p.classList.contains('open')) loadSettingsUI();
+}
+
+// ── Sync / Data fetch ─────────────────────────────────────────────────────────
+async function syncExpenses() {
+  const s = getSettings();
+  const dot = document.getElementById('conn-dot');
+  const label = document.getElementById('conn-label');
+  dot.className = 'status-dot';
+  label.textContent = 'syncing…';
+
+  try {
+    const url = s.serverUrl.replace(/\/$/, '') + s.apiPath;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const raw = await resp.json();
+    transactions = normalizeTransactions(raw, s.dataWindow);
+    localStorage.setItem('fc_cache', JSON.stringify(transactions));
+    localStorage.setItem('fc_cache_time', Date.now());
+    dot.className = 'status-dot connected';
+    label.textContent = 'synced';
+    updateStats();
+    toast(`Loaded ${transactions.length} transactions`);
+  } catch (e) {
+    // Try cache fallback
+    const cached = localStorage.getItem('fc_cache');
+    if (cached) {
+      transactions = JSON.parse(cached);
+      label.textContent = 'cached';
+      updateStats();
+      toast('Server unreachable — using cached data');
+    } else {
+      label.textContent = 'error';
+      toast('Could not reach unfold server. Is it running?');
+    }
+  }
+  updateCacheInfo();
+}
+
+// Normalize various possible shapes from unfold forks
+function normalizeTransactions(raw, windowDays) {
+  let list = Array.isArray(raw) ? raw : (raw.transactions || raw.data || []);
+  
+  // Normalize fields across different unfold fork schemas
+  list = list.map(t => ({
+    id:       t.id || t._id || Math.random().toString(36).slice(2),
+    date:     t.date || t.created_at || t.timestamp || t.time || '',
+    amount:   parseFloat(t.amount || t.debit || t.credit || 0),
+    type:     (t.type || (t.debit ? 'debit' : 'credit') || 'debit').toLowerCase(),
+    category: t.category || t.tag || t.label || 'Uncategorized',
+    merchant: t.merchant || t.name || t.description || t.narration || 'Unknown',
+    note:     t.note || t.remarks || '',
+    account:  t.account || t.bank || '',
+  }));
+
+  // Filter by date window
+  if (windowDays > 0) {
+    const cutoff = Date.now() - windowDays * 86400_000;
+    list = list.filter(t => {
+      const d = new Date(t.date).getTime();
+      return !isNaN(d) && d >= cutoff;
+    });
+  }
+
+  return list.sort((a, b) => new Date(b.date) - new Date(a.date));
+}
+
+function loadCache() {
+  const cached = localStorage.getItem('fc_cache');
+  if (cached) {
+    transactions = JSON.parse(cached);
+    document.getElementById('conn-label').textContent = 'cached';
+    updateStats();
+  }
+  updateCacheInfo();
+}
+
+function updateStats() {
+  if (!transactions.length) return;
+
+  const debits = transactions.filter(t => t.type === 'debit' || t.amount < 0);
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const weekAgo = new Date(Date.now() - 7 * 86400_000);
+
+  const monthTotal = debits
+    .filter(t => new Date(t.date) >= monthStart)
+    .reduce((s, t) => s + Math.abs(t.amount), 0);
+
+  const weekTotal = debits
+    .filter(t => new Date(t.date) >= weekAgo)
+    .reduce((s, t) => s + Math.abs(t.amount), 0);
+
+  document.getElementById('stat-month').textContent = '₹' + fmt(monthTotal);
+  document.getElementById('stat-week').textContent  = '₹' + fmt(weekTotal);
+  document.getElementById('stat-count').textContent = transactions.length;
+
+  document.getElementById('stats-bar').style.display = 'flex';
+
+  // Date range label
+  if (transactions.length) {
+    const dates = transactions.map(t => t.date).filter(Boolean);
+    const latest = dates[0] || '';
+    const oldest = dates[dates.length - 1] || '';
+    document.getElementById('data-range').textContent =
+      oldest.slice(0,10) + ' → ' + latest.slice(0,10);
+  }
+}
+
+function fmt(n) {
+  if (n >= 100000) return (n/100000).toFixed(1) + 'L';
+  if (n >= 1000)   return (n/1000).toFixed(1) + 'k';
+  return n.toFixed(0);
+}
+
+function updateCacheInfo() {
+  const t = localStorage.getItem('fc_cache_time');
+  const cached = localStorage.getItem('fc_cache');
+  const count = cached ? JSON.parse(cached).length : 0;
+  const timeStr = t ? new Date(parseInt(t)).toLocaleString() : 'never';
+  document.getElementById('cache-info').textContent = `${count} txns · ${timeStr}`;
+}
+
+// ── Build context for Claude ──────────────────────────────────────────────────
+function buildContext() {
+  if (!transactions.length) return 'No expense data loaded yet.';
+
+  const debits = transactions.filter(t => t.type === 'debit' || t.amount < 0);
+  const credits = transactions.filter(t => t.type === 'credit' || t.amount > 0);
+
+  // Category totals
+  const catTotals = {};
+  debits.forEach(t => {
+    catTotals[t.category] = (catTotals[t.category] || 0) + Math.abs(t.amount);
+  });
+  const cats = Object.entries(catTotals)
+    .sort((a,b) => b[1]-a[1])
+    .slice(0, 12)
+    .map(([c, v]) => `  ${c}: ₹${v.toFixed(0)}`)
+    .join('\n');
+
+  // Merchant totals
+  const merchantTotals = {};
+  debits.forEach(t => {
+    merchantTotals[t.merchant] = (merchantTotals[t.merchant] || 0) + Math.abs(t.amount);
+  });
+  const merchants = Object.entries(merchantTotals)
+    .sort((a,b) => b[1]-a[1])
+    .slice(0, 10)
+    .map(([m, v]) => `  ${m}: ₹${v.toFixed(0)}`)
+    .join('\n');
+
+  // Recent transactions (last 50)
+  const recent = transactions.slice(0, 50).map(t =>
+    `  ${t.date.slice(0,10)} | ${t.type.padEnd(6)} | ₹${Math.abs(t.amount).toFixed(0).padStart(8)} | ${t.category.padEnd(16)} | ${t.merchant}`
+  ).join('\n');
+
+  const totalDebit = debits.reduce((s, t) => s + Math.abs(t.amount), 0);
+  const totalCredit = credits.reduce((s, t) => s + Math.abs(t.amount), 0);
+  const avgPerDay = debits.length && transactions[0]?.date && transactions[transactions.length-1]?.date
+    ? totalDebit / Math.max(1, (new Date(transactions[0].date) - new Date(transactions[transactions.length-1].date)) / 86400_000)
+    : 0;
+
+  return `EXPENSE DATA SUMMARY
+====================
+Total transactions: ${transactions.length}
+Debits: ${debits.length} | Total spent: ₹${totalDebit.toFixed(0)}
+Credits: ${credits.length} | Total received: ₹${totalCredit.toFixed(0)}
+Daily average spend: ₹${avgPerDay.toFixed(0)}
+Date range: ${transactions[transactions.length-1]?.date?.slice(0,10)} to ${transactions[0]?.date?.slice(0,10)}
+
+TOP CATEGORIES (by spend):
+${cats}
+
+TOP MERCHANTS (by spend):
+${merchants}
+
+RECENT TRANSACTIONS (last 50):
+  Date       | Type   | Amount   | Category         | Merchant
+${recent}`;
+}
+
+// ── Claude API ────────────────────────────────────────────────────────────────
+async function callClaude(userMessage) {
+  const s = getSettings();
+  if (!s.apiKey) throw new Error('No API key set. Open settings and add your Claude API key.');
+
+  const context = buildContext();
+  const baseSystem = `You are a personal finance assistant with access to the user's expense data from the Fold app. 
+Analyze their spending patterns and answer questions clearly and helpfully.
+When mentioning amounts, format them as ₹X,XXX or ₹X.Xk for amounts over 1000. 
+Be concise. Use bullet points for lists. If asked for comparisons, make them clear.
+Today's date: ${new Date().toISOString().slice(0,10)}.
+
+${s.systemPrompt ? 'Additional instructions: ' + s.systemPrompt : ''}
+
+${context}`;
+
+  const messages = [
+    ...chatHistory,
+    { role: 'user', content: userMessage }
+  ];
+
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1024,
+      system: baseSystem,
+      messages,
+    }),
+  });
+
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.error?.message || `API error ${resp.status}`);
+  }
+
+  const data = await resp.json();
+  return data.content[0]?.text || '(empty response)';
+}
+
+// ── Chat UI ───────────────────────────────────────────────────────────────────
+function showMessages() {
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('messages').style.display = 'flex';
+}
+
+function addBubble(role, text) {
+  const msgs = document.getElementById('messages');
+  showMessages();
+
+  const wrap = document.createElement('div');
+  wrap.className = `msg msg-${role === 'user' ? 'user' : 'ai'}`;
+
+  const bubble = document.createElement('div');
+  bubble.className = `bubble bubble-${role === 'user' ? 'user' : 'ai'}`;
+  bubble.innerHTML = formatMessage(text);
+
+  const meta = document.createElement('div');
+  meta.className = 'msg-meta';
+  meta.textContent = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+
+  wrap.appendChild(bubble);
+  wrap.appendChild(meta);
+  msgs.appendChild(wrap);
+  msgs.scrollTop = msgs.scrollHeight;
+  return wrap;
+}
+
+function addTypingIndicator() {
+  const msgs = document.getElementById('messages');
+  showMessages();
+  const wrap = document.createElement('div');
+  wrap.className = 'msg msg-ai';
+  wrap.id = 'typing-wrap';
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble bubble-ai typing-indicator';
+  bubble.innerHTML = '<div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>';
+  wrap.appendChild(bubble);
+  msgs.appendChild(wrap);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function removeTypingIndicator() {
+  document.getElementById('typing-wrap')?.remove();
+}
+
+function formatMessage(text) {
+  // Basic markdown-ish formatting
+  return text
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/(₹[\d,.]+[kLCr]*)/g, '<span class="amount">$1</span>')
+    .replace(/\n\n/g, '</p><p>')
+    .replace(/\n- /g, '</p><ul><li>').replace(/\n  - /g, '<li>')
+    .replace(/\n(\d+)\. /g, '</p><ol><li>')
+    .replace(/\n/g, '<br>')
+    .replace(/^/, '<p>').replace(/$/, '</p>');
+}
+
+async function sendMessage(overrideText) {
+  const input = document.getElementById('chat-input');
+  const text = overrideText || input.value.trim();
+  if (!text || isLoading) return;
+
+  if (!overrideText) input.value = '';
+  autoResize(input);
+
+  isLoading = true;
+  document.getElementById('send-btn').disabled = true;
+
+  addBubble('user', text);
+  addTypingIndicator();
+
+  try {
+    const reply = await callClaude(text);
+    removeTypingIndicator();
+    addBubble('ai', reply);
+    chatHistory.push({ role: 'user', content: text });
+    chatHistory.push({ role: 'assistant', content: reply });
+    // Keep history manageable
+    if (chatHistory.length > 20) chatHistory = chatHistory.slice(-16);
+  } catch (e) {
+    removeTypingIndicator();
+    addBubble('ai', '⚠ ' + e.message);
+  }
+
+  isLoading = false;
+  document.getElementById('send-btn').disabled = false;
+  document.getElementById('chat-input').focus();
+}
+
+function askAbout(q) {
+  sendMessage(q);
+}
+
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+function clearChat() {
+  chatHistory = [];
+  const msgs = document.getElementById('messages');
+  msgs.innerHTML = '';
+  msgs.style.display = 'none';
+  document.getElementById('empty-state').style.display = 'flex';
+  toast('Chat cleared');
+}
+
+function clearCache() {
+  localStorage.removeItem('fc_cache');
+  localStorage.removeItem('fc_cache_time');
+  transactions = [];
+  document.getElementById('stats-bar').style.display = 'none';
+  document.getElementById('data-range').textContent = 'no data loaded';
+  document.getElementById('conn-label').textContent = 'sync';
+  document.getElementById('conn-dot').className = 'status-dot';
+  updateCacheInfo();
+  toast('Cache cleared');
+}
+
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+loadCache();
+document.getElementById('chat-input').focus();
+</script>
+</body>
+</html>
