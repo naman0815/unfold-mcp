@@ -40,21 +40,19 @@ STEP 2 — Clone the repository into the current directory:
 
 STEP 3 — Install system dependencies if missing. Check and install each:
 
-  ── macOS ──────────────────────────────
-  a) Xcode Command Line Tools (required by the sqlite3 native module):
-       Check: xcode-select -p
-       Install (if missing): xcode-select --install
-       Wait for the installation to finish before continuing.
+  Note: npm install requires NO build tools — the SQLite dependency is pure WebAssembly.
+  No Xcode, no Visual Studio Build Tools, nothing to compile.
 
-  b) Homebrew:
+  ── macOS ──────────────────────────────
+  a) Homebrew:
        Check: command -v brew
        Install: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
-  c) Node.js (v18+):
+  b) Node.js (v18+):
        Check: node --version
        Install: brew install node
 
-  d) Go (v1.20+):
+  c) Go (v1.20+):
        Check: go version
        Install: brew install go
 

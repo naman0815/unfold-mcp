@@ -32,7 +32,7 @@ cd fold-mcp && npm install && npm run build && cd ..
 cd unfold_cli && go build -o ../unfold_patched . && cd ..
 ```
 
-> **macOS note:** `npm install` compiles a native SQLite binding. If it fails, run `xcode-select --install` first.
+> **No build tools required.** `npm install` downloads a pure WebAssembly SQLite — no Xcode, no native compilation.
 
 ### 2. Log in to Fold
 
