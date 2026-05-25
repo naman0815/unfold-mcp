@@ -177,12 +177,13 @@ const GET_RECENT_TRANSACTIONS_TOOL: Tool = {
 
 const SEARCH_TRANSACTIONS_TOOL: Tool = {
   name: "search_transactions",
-  description: "Search transactions by merchant, narration, exact tag, date range, amount range, payment mode, or type.",
+  description: "Search transactions by merchant, narration, summary description, exact tag, date range, amount range, payment mode, or type.",
   inputSchema: {
     type: "object",
     properties: {
       query:     { type: "string", description: "Text search on merchant name (LIKE match)." },
       narration: { type: "string", description: "Text search on raw bank narration (LIKE match)." },
+      summary:   { type: "string", description: "Text search on the natural-language transaction summary (e.g. 'transferred ₹500 to Zepto'). Catches things merchant search misses." },
       tag:       { type: "string", description: "Exact tag match (e.g. 'food'). Uses proper JSON array lookup — more reliable than query for tags." },
       startDate: { type: "string", description: "Filter from this date (YYYY-MM-DD)." },
       endDate:   { type: "string", description: "Filter to this date (YYYY-MM-DD)." },
@@ -201,8 +202,9 @@ const GET_SPENDING_SUMMARY_TOOL: Tool = {
   inputSchema: {
     type: "object",
     properties: {
-      startDate: { type: "string", description: "Start date (YYYY-MM-DD). Defaults to 30 days ago." },
-      endDate:   { type: "string", description: "End date (YYYY-MM-DD). Defaults to today." }
+      startDate:        { type: "string",  description: "Start date (YYYY-MM-DD). Defaults to 30 days ago." },
+      endDate:          { type: "string",  description: "End date (YYYY-MM-DD). Defaults to today." },
+      excludeTransfers: { type: "boolean", description: "Exclude internal transfers between your own accounts. Default false." }
     }
   }
 };
@@ -234,10 +236,11 @@ const GET_MERCHANT_SUMMARY_TOOL: Tool = {
   inputSchema: {
     type: "object",
     properties: {
-      startDate: { type: "string", description: "Start date (YYYY-MM-DD). Defaults to 30 days ago." },
-      endDate:   { type: "string", description: "End date (YYYY-MM-DD). Defaults to today." },
-      limit:     { type: "number", description: "Number of top merchants to return (max 50).", default: 10 },
-      sortBy:    { type: "string", description: "Sort by 'amount' (total spend, default) or 'count' (frequency)." }
+      startDate:        { type: "string",  description: "Start date (YYYY-MM-DD). Defaults to 30 days ago." },
+      endDate:          { type: "string",  description: "End date (YYYY-MM-DD). Defaults to today." },
+      limit:            { type: "number",  description: "Number of top merchants to return (max 50).", default: 10 },
+      sortBy:           { type: "string",  description: "Sort by 'amount' (total spend, default) or 'count' (frequency)." },
+      excludeTransfers: { type: "boolean", description: "Exclude internal transfers between your own accounts. Default false." }
     }
   }
 };
@@ -248,8 +251,9 @@ const GET_MONTHLY_TREND_TOOL: Tool = {
   inputSchema: {
     type: "object",
     properties: {
-      startDate: { type: "string", description: "Start date (YYYY-MM-DD). Defaults to 12 months ago." },
-      endDate:   { type: "string", description: "End date (YYYY-MM-DD). Defaults to today." }
+      startDate:        { type: "string",  description: "Start date (YYYY-MM-DD). Defaults to 12 months ago." },
+      endDate:          { type: "string",  description: "End date (YYYY-MM-DD). Defaults to today." },
+      excludeTransfers: { type: "boolean", description: "Exclude internal transfers between your own accounts. Default false." }
     }
   }
 };
@@ -345,9 +349,74 @@ const GET_SPENDING_STREAK_TOOL: Tool = {
   }
 };
 
+const GET_RECURRING_MERCHANTS_TOOL: Tool = {
+  name: "get_recurring_merchants",
+  description: "Find merchants you pay regularly month after month — subscriptions, habits, recurring bills. Shows how many months each appeared and your average spend.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      startDate:  { type: "string", description: "Start date (YYYY-MM-DD). Defaults to 12 months ago." },
+      endDate:    { type: "string", description: "End date (YYYY-MM-DD). Defaults to today." },
+      minMonths:  { type: "number", description: "Minimum distinct months a merchant must appear to be listed. Default 3.", default: 3 },
+      limit:      { type: "number", description: "Max results. Default 20.", default: 20 }
+    }
+  }
+};
+
+const COMPARE_PERIODS_TOOL: Tool = {
+  name: "compare_periods",
+  description: "Compare spending side-by-side across two date ranges. Shows income, spending, net, avg daily spend, and % change between periods.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      period1Start:     { type: "string",  description: "Start of period 1 (YYYY-MM-DD). Defaults to first day of this month." },
+      period1End:       { type: "string",  description: "End of period 1 (YYYY-MM-DD). Defaults to today." },
+      period2Start:     { type: "string",  description: "Start of period 2 (YYYY-MM-DD). Defaults to first day of last month." },
+      period2End:       { type: "string",  description: "End of period 2 (YYYY-MM-DD). Defaults to last day of last month." },
+      excludeTransfers: { type: "boolean", description: "Exclude internal transfers. Default false." }
+    }
+  }
+};
+
+const GET_SPENDING_FORECAST_TOOL: Tool = {
+  name: "get_spending_forecast",
+  description: "Project where your spending will land by end of month, based on your pace so far. Compares to last month's actual.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      excludeTransfers: { type: "boolean", description: "Exclude internal transfers from the forecast. Default false." }
+    }
+  }
+};
+
+const GET_ACCOUNT_BREAKDOWN_TOOL: Tool = {
+  name: "get_account_breakdown",
+  description: "Break down spending and income by bank account. You have 4 accounts — this shows which account does what.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      startDate: { type: "string", description: "Start date (YYYY-MM-DD). Defaults to 30 days ago." },
+      endDate:   { type: "string", description: "End date (YYYY-MM-DD). Defaults to today." }
+    }
+  }
+};
+
+const GET_DAY_OF_WEEK_PATTERNS_TOOL: Tool = {
+  name: "get_day_of_week_patterns",
+  description: "See which days of the week (or days of the month) you spend the most and least. Surfaces patterns like 'you spend 3x more on Saturdays' or 'salary-day spikes on the 1st'.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      startDate: { type: "string", description: "Start date (YYYY-MM-DD). Defaults to 90 days ago." },
+      endDate:   { type: "string", description: "End date (YYYY-MM-DD). Defaults to today." },
+      groupBy:   { type: "string", description: "'weekday' (default) or 'monthday'." }
+    }
+  }
+};
+
 // ─── Server ───────────────────────────────────────────────────────────────────
 const server = new Server(
-  { name: "fold-mcp", version: "4.0.0" },
+  { name: "fold-mcp", version: "5.0.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -368,6 +437,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     GET_UNUSUAL_TRANSACTIONS_TOOL,
     GET_CATEGORY_BREAKDOWN_TOOL,
     GET_SPENDING_STREAK_TOOL,
+    GET_RECURRING_MERCHANTS_TOOL,
+    COMPARE_PERIODS_TOOL,
+    GET_SPENDING_FORECAST_TOOL,
+    GET_ACCOUNT_BREAKDOWN_TOOL,
+    GET_DAY_OF_WEEK_PATTERNS_TOOL,
   ],
 }));
 
@@ -390,6 +464,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (request.params.name === "search_transactions") {
       const query     = request.params.arguments?.query     as string | undefined;
       const narration = request.params.arguments?.narration as string | undefined;
+      const summary   = request.params.arguments?.summary   as string | undefined;
       const tag       = request.params.arguments?.tag       as string | undefined;
       const startDate = request.params.arguments?.startDate as string | undefined;
       const endDate   = request.params.arguments?.endDate   as string | undefined;
@@ -404,6 +479,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       if (query)     { conditions.push("merchant LIKE ?");              params.push(`%${query}%`); }
       if (narration) { conditions.push("narration LIKE ?");             params.push(`%${narration}%`); }
+      if (summary)   { conditions.push("summary LIKE ?");               params.push(`%${summary}%`); }
       if (startDate) { conditions.push("date(timestamp) >= ?");         params.push(startDate); }
       if (endDate)   { conditions.push("date(timestamp) <= ?");         params.push(endDate); }
       if (type)      { conditions.push("type = ?");                     params.push(type.toUpperCase()); }
@@ -437,8 +513,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (request.params.name === "get_spending_summary") {
       const today         = new Date().toISOString().slice(0, 10);
       const thirtyDaysAgo = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
-      const startDate = (request.params.arguments?.startDate as string) || thirtyDaysAgo;
-      const endDate   = (request.params.arguments?.endDate   as string) || today;
+      const startDate       = (request.params.arguments?.startDate as string) || thirtyDaysAgo;
+      const endDate         = (request.params.arguments?.endDate   as string) || today;
+      const excludeTransfers = Boolean(request.params.arguments?.excludeTransfers);
+      const xferClause       = excludeTransfers ? " AND excluded_from_cash_flow = 0" : "";
 
       const [summary] = await runQuery<any>(
         `SELECT
@@ -447,7 +525,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
            COUNT(*) as tx_count,
            AVG(CASE WHEN type = 'OUTGOING' THEN amount END) as avg_spend
          FROM transactions
-         WHERE date(timestamp) >= ? AND date(timestamp) <= ?`,
+         WHERE date(timestamp) >= ? AND date(timestamp) <= ?${xferClause}`,
         [startDate, endDate]
       );
 
@@ -455,7 +533,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         `SELECT merchant, SUM(amount) as total, COUNT(*) as cnt
          FROM transactions
          WHERE type = 'OUTGOING' AND date(timestamp) >= ? AND date(timestamp) <= ?
-           AND merchant IS NOT NULL AND merchant != ''
+           AND merchant IS NOT NULL AND merchant != ''${xferClause}
          GROUP BY merchant ORDER BY total DESC LIMIT 5`,
         [startDate, endDate]
       );
@@ -464,8 +542,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const days = Math.max(1, Math.round((new Date(endDate).getTime() - new Date(startDate).getTime()) / msPerDay) + 1);
       const incoming = summary.total_incoming || 0;
       const outgoing = summary.total_outgoing || 0;
+      const xferNote = excludeTransfers ? " (transfers excluded)" : "";
 
-      let text = `Spending summary (${startDate} → ${endDate}):\n` +
+      let text = `Spending summary (${startDate} → ${endDate})${xferNote}:\n` +
         `- Total Incoming:   ${fmtAmount(incoming)}\n` +
         `- Total Outgoing:   ${fmtAmount(outgoing)}\n` +
         `- Net:              ${outgoing <= incoming ? "+" : ""}${fmtAmount(incoming - outgoing)}\n` +
@@ -576,16 +655,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (request.params.name === "get_merchant_summary") {
       const today         = new Date().toISOString().slice(0, 10);
       const thirtyDaysAgo = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
-      const startDate = (request.params.arguments?.startDate as string) || thirtyDaysAgo;
-      const endDate   = (request.params.arguments?.endDate   as string) || today;
-      const limit     = Math.min(Number(request.params.arguments?.limit ?? 10), 50);
-      const sortCol   = (request.params.arguments?.sortBy as string) === "count" ? "cnt" : "total";
+      const startDate       = (request.params.arguments?.startDate as string) || thirtyDaysAgo;
+      const endDate         = (request.params.arguments?.endDate   as string) || today;
+      const limit           = Math.min(Number(request.params.arguments?.limit ?? 10), 50);
+      const sortCol         = (request.params.arguments?.sortBy as string) === "count" ? "cnt" : "total";
+      const excludeTransfers = Boolean(request.params.arguments?.excludeTransfers);
+      const xferClause       = excludeTransfers ? " AND excluded_from_cash_flow = 0" : "";
 
       const rows = await runQuery<any>(
         `SELECT merchant, SUM(amount) as total, COUNT(*) as cnt, AVG(amount) as avg
          FROM transactions
          WHERE type = 'OUTGOING' AND date(timestamp) >= ? AND date(timestamp) <= ?
-           AND merchant IS NOT NULL AND merchant != ''
+           AND merchant IS NOT NULL AND merchant != ''${xferClause}
          GROUP BY merchant ORDER BY ${sortCol} DESC LIMIT ?`,
         [startDate, endDate, limit]
       );
@@ -595,7 +676,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       const sortLabel = sortCol === "cnt" ? "frequency" : "total spend";
-      let text = `Top merchants by ${sortLabel} (${startDate} → ${endDate}):\n\n`;
+      const xferNote  = excludeTransfers ? " (transfers excluded)" : "";
+      let text = `Top merchants by ${sortLabel} (${startDate} → ${endDate})${xferNote}:\n\n`;
       rows.forEach((r: any, i: number) => {
         text += `${i + 1}. ${truncate(r.merchant, 45)}\n`;
         text += `   ${fmtAmount(r.total)} total | ${r.cnt} txn${r.cnt === 1 ? "" : "s"} | ${fmtAmount(r.avg)} avg\n`;
@@ -606,10 +688,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     // ── get_monthly_trend ───────────────────────────────────────────────────
     if (request.params.name === "get_monthly_trend") {
-      const today          = new Date().toISOString().slice(0, 10);
+      const today           = new Date().toISOString().slice(0, 10);
       const twelveMonthsAgo = new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10);
-      const startDate = (request.params.arguments?.startDate as string) || twelveMonthsAgo;
-      const endDate   = (request.params.arguments?.endDate   as string) || today;
+      const startDate        = (request.params.arguments?.startDate as string) || twelveMonthsAgo;
+      const endDate          = (request.params.arguments?.endDate   as string) || today;
+      const excludeTransfers = Boolean(request.params.arguments?.excludeTransfers);
+      const xferClause       = excludeTransfers ? " AND excluded_from_cash_flow = 0" : "";
 
       const rows = await runQuery<any>(
         `SELECT strftime('%Y-%m', timestamp) as month,
@@ -617,7 +701,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 SUM(CASE WHEN type = 'OUTGOING' THEN amount ELSE 0 END) as outgoing,
                 COUNT(*) as tx_count
          FROM transactions
-         WHERE date(timestamp) >= ? AND date(timestamp) <= ?
+         WHERE date(timestamp) >= ? AND date(timestamp) <= ?${xferClause}
          GROUP BY month ORDER BY month ASC`,
         [startDate, endDate]
       );
@@ -627,7 +711,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       const pad = (s: string, w: number) => s.padStart(w);
-      let text = `Monthly trend (${startDate} → ${endDate}):\n\n`;
+      const xferNote = excludeTransfers ? " (transfers excluded)" : "";
+      let text = `Monthly trend (${startDate} → ${endDate})${xferNote}:\n\n`;
       text += `Month    | Income        | Spending      | Net           | Txns\n`;
       text += `---------|---------------|---------------|---------------|----- \n`;
 
@@ -1084,6 +1169,277 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return { content: [{ type: "text", text }] };
     }
 
+    // ── get_recurring_merchants ─────────────────────────────────────────────
+    if (request.params.name === "get_recurring_merchants") {
+      const today          = new Date().toISOString().slice(0, 10);
+      const twelveMonthsAgo = new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10);
+      const startDate = (request.params.arguments?.startDate as string) || twelveMonthsAgo;
+      const endDate   = (request.params.arguments?.endDate   as string) || today;
+      const minMonths = Number(request.params.arguments?.minMonths ?? 3);
+      const limit     = Math.min(Number(request.params.arguments?.limit ?? 20), 100);
+
+      const rows = await runQuery<any>(
+        `SELECT merchant,
+                COUNT(DISTINCT strftime('%Y-%m', timestamp)) as months_active,
+                COUNT(*) as total_transactions,
+                ROUND(AVG(amount), 0) as avg_amount,
+                SUM(amount) as total_spent,
+                MIN(date(timestamp)) as first_seen,
+                MAX(date(timestamp)) as last_seen
+         FROM transactions
+         WHERE type = 'OUTGOING'
+           AND merchant IS NOT NULL AND merchant != ''
+           AND date(timestamp) >= ? AND date(timestamp) <= ?
+         GROUP BY merchant
+         HAVING COUNT(DISTINCT strftime('%Y-%m', timestamp)) >= ?
+         ORDER BY months_active DESC, avg_amount DESC
+         LIMIT ?`,
+        [startDate, endDate, minMonths, limit]
+      );
+
+      if (!rows.length) {
+        return { content: [{ type: "text", text: `No recurring merchants found (${startDate} → ${endDate}, min ${minMonths} months).` }] };
+      }
+
+      let text = `Recurring merchants (${startDate} → ${endDate}, appearing in ${minMonths}+ months):\n\n`;
+      rows.forEach((r: any, i: number) => {
+        text += `${i + 1}. ${truncate(r.merchant, 40)}\n`;
+        text += `   ${r.months_active} months | ${fmtAmount(r.avg_amount)}/time avg | ${fmtAmount(r.total_spent)} total | ${r.total_transactions} txns\n`;
+        text += `   Active: ${r.first_seen} → ${r.last_seen}\n`;
+      });
+
+      return { content: [{ type: "text", text }] };
+    }
+
+    // ── compare_periods ─────────────────────────────────────────────────────
+    if (request.params.name === "compare_periods") {
+      const today = new Date();
+      const todayStr = today.toISOString().slice(0, 10);
+
+      // Default period 1: this month so far
+      const thisMonthStart = `${todayStr.slice(0, 7)}-01`;
+      // Default period 2: full previous month
+      const prevMonthDate  = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      const prevMonthStart = prevMonthDate.toISOString().slice(0, 7) + "-01";
+      const prevMonthEnd   = new Date(today.getFullYear(), today.getMonth(), 0).toISOString().slice(0, 10);
+
+      const p1Start         = (request.params.arguments?.period1Start as string) || thisMonthStart;
+      const p1End           = (request.params.arguments?.period1End   as string) || todayStr;
+      const p2Start         = (request.params.arguments?.period2Start as string) || prevMonthStart;
+      const p2End           = (request.params.arguments?.period2End   as string) || prevMonthEnd;
+      const excludeTransfers = Boolean(request.params.arguments?.excludeTransfers);
+      const xferClause       = excludeTransfers ? " AND excluded_from_cash_flow = 0" : "";
+
+      async function periodStats(start: string, end: string) {
+        const [s] = await runQuery<any>(
+          `SELECT SUM(CASE WHEN type = 'INCOMING' THEN amount ELSE 0 END) as incoming,
+                  SUM(CASE WHEN type = 'OUTGOING' THEN amount ELSE 0 END) as outgoing,
+                  COUNT(*) as tx_count
+           FROM transactions
+           WHERE date(timestamp) >= ? AND date(timestamp) <= ?${xferClause}`,
+          [start, end]
+        );
+        const days = Math.max(1, Math.round((new Date(end).getTime() - new Date(start).getTime()) / 864e5) + 1);
+        return { incoming: s.incoming || 0, outgoing: s.outgoing || 0, tx_count: s.tx_count || 0, days };
+      }
+
+      const [p1, p2] = await Promise.all([periodStats(p1Start, p1End), periodStats(p2Start, p2End)]);
+
+      function pctChange(a: number, b: number): string {
+        if (b === 0) return "N/A";
+        const pct = ((a - b) / b * 100).toFixed(0);
+        return (Number(pct) >= 0 ? "+" : "") + pct + "%";
+      }
+
+      const xferNote = excludeTransfers ? " (transfers excluded)" : "";
+      let text = `Period comparison${xferNote}:\n\n`;
+      const col1 = `${p1Start} → ${p1End}`.padEnd(26);
+      const col2 = `${p2Start} → ${p2End}`.padEnd(26);
+      text += `                       ${col1}  ${col2}  Change\n`;
+      text += `${"─".repeat(90)}\n`;
+
+      const rows2 = [
+        ["Spending",    fmtAmount(p1.outgoing),        fmtAmount(p2.outgoing),        pctChange(p1.outgoing, p2.outgoing)],
+        ["Income",      fmtAmount(p1.incoming),        fmtAmount(p2.incoming),        pctChange(p1.incoming, p2.incoming)],
+        ["Net",         (p1.incoming - p1.outgoing >= 0 ? "+" : "") + fmtAmount(p1.incoming - p1.outgoing),
+                        (p2.incoming - p2.outgoing >= 0 ? "+" : "") + fmtAmount(p2.incoming - p2.outgoing), ""],
+        ["Avg/day",     fmtAmount(p1.outgoing / p1.days), fmtAmount(p2.outgoing / p2.days), pctChange(p1.outgoing / p1.days, p2.outgoing / p2.days)],
+        ["Transactions",String(p1.tx_count),            String(p2.tx_count),            pctChange(p1.tx_count, p2.tx_count)],
+      ];
+
+      for (const [label, v1, v2, chg] of rows2) {
+        text += `${label.padEnd(15)} ${v1.padStart(18)}  ${v2.padStart(26)}  ${chg}\n`;
+      }
+
+      return { content: [{ type: "text", text }] };
+    }
+
+    // ── get_spending_forecast ────────────────────────────────────────────────
+    if (request.params.name === "get_spending_forecast") {
+      const excludeTransfers = Boolean(request.params.arguments?.excludeTransfers);
+      const xferClause       = excludeTransfers ? " AND excluded_from_cash_flow = 0" : "";
+
+      const today = new Date();
+      const todayStr       = today.toISOString().slice(0, 10);
+      const monthStart     = `${todayStr.slice(0, 7)}-01`;
+      const dayOfMonth     = today.getDate();
+      const daysInMonth    = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+
+      // Previous month
+      const prevMonthDate  = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      const prevStart      = prevMonthDate.toISOString().slice(0, 7) + "-01";
+      const prevEnd        = new Date(today.getFullYear(), today.getMonth(), 0).toISOString().slice(0, 10);
+
+      const [[current], [prev]] = await Promise.all([
+        runQuery<any>(
+          `SELECT SUM(CASE WHEN type = 'OUTGOING' THEN amount ELSE 0 END) as outgoing,
+                  SUM(CASE WHEN type = 'INCOMING' THEN amount ELSE 0 END) as incoming
+           FROM transactions
+           WHERE date(timestamp) >= ? AND date(timestamp) <= ?${xferClause}`,
+          [monthStart, todayStr]
+        ),
+        runQuery<any>(
+          `SELECT SUM(CASE WHEN type = 'OUTGOING' THEN amount ELSE 0 END) as outgoing
+           FROM transactions
+           WHERE date(timestamp) >= ? AND date(timestamp) <= ?${xferClause}`,
+          [prevStart, prevEnd]
+        ),
+      ]);
+
+      const spentSoFar  = current.outgoing || 0;
+      const incomeSoFar = current.incoming || 0;
+      const projected   = dayOfMonth > 0 ? Math.round((spentSoFar / dayOfMonth) * daysInMonth) : 0;
+      const lastMonth   = prev.outgoing || 0;
+      const vsLastMonth = lastMonth > 0 ? (((projected - lastMonth) / lastMonth) * 100).toFixed(0) : null;
+
+      const xferNote = excludeTransfers ? " (transfers excluded)" : "";
+      let text = `Spending forecast — ${todayStr.slice(0, 7)}${xferNote}:\n\n`;
+      text += `Day ${dayOfMonth} of ${daysInMonth}\n\n`;
+      text += `Spent so far:    ${fmtAmount(spentSoFar)}\n`;
+      text += `Income so far:   ${fmtAmount(incomeSoFar)}\n`;
+      text += `Projected total: ${fmtAmount(projected)}`;
+      if (vsLastMonth !== null) {
+        const sign = Number(vsLastMonth) >= 0 ? "+" : "";
+        text += `  (${sign}${vsLastMonth}% vs last month's ${fmtAmount(lastMonth)})`;
+      }
+      text += `\n\nDaily pace:      ${fmtAmount(Math.round(spentSoFar / dayOfMonth))}/day\n`;
+      text += `Remaining days:  ${daysInMonth - dayOfMonth}\n`;
+      text += `Budget to stay flat: ${fmtAmount(Math.max(0, lastMonth - spentSoFar))} left to match last month\n`;
+
+      return { content: [{ type: "text", text }] };
+    }
+
+    // ── get_account_breakdown ────────────────────────────────────────────────
+    if (request.params.name === "get_account_breakdown") {
+      const today         = new Date().toISOString().slice(0, 10);
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+      const startDate = (request.params.arguments?.startDate as string) || thirtyDaysAgo;
+      const endDate   = (request.params.arguments?.endDate   as string) || today;
+
+      const rows = await runQuery<any>(
+        `SELECT account_id,
+                SUM(CASE WHEN type = 'OUTGOING' THEN amount ELSE 0 END) as outgoing,
+                SUM(CASE WHEN type = 'INCOMING' THEN amount ELSE 0 END) as incoming,
+                COUNT(*) as tx_count,
+                MAX(date(timestamp)) as last_activity
+         FROM transactions
+         WHERE account_id IS NOT NULL AND account_id != ''
+           AND date(timestamp) >= ? AND date(timestamp) <= ?
+         GROUP BY account_id
+         ORDER BY outgoing DESC`,
+        [startDate, endDate]
+      );
+
+      if (!rows.length) {
+        return { content: [{ type: "text", text: `No transactions with account data found from ${startDate} to ${endDate}.` }] };
+      }
+
+      let text = `Account breakdown (${startDate} → ${endDate}):\n`;
+      text += `(Accounts shown by UUID — label them once you identify which is which)\n\n`;
+      rows.forEach((r: any, i: number) => {
+        const net = r.incoming - r.outgoing;
+        const shortId = (r.account_id as string).slice(0, 8) + "…";
+        text += `Account ${i + 1}  [${shortId}]\n`;
+        text += `  Spending:  ${fmtAmount(r.outgoing)}\n`;
+        text += `  Income:    ${fmtAmount(r.incoming)}\n`;
+        text += `  Net:       ${net >= 0 ? "+" : ""}${fmtAmount(net)}\n`;
+        text += `  Txns:      ${r.tx_count}  |  Last active: ${r.last_activity}\n\n`;
+      });
+
+      return { content: [{ type: "text", text }] };
+    }
+
+    // ── get_day_of_week_patterns ─────────────────────────────────────────────
+    if (request.params.name === "get_day_of_week_patterns") {
+      const today        = new Date().toISOString().slice(0, 10);
+      const ninetyDaysAgo = new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10);
+      const startDate = (request.params.arguments?.startDate as string) || ninetyDaysAgo;
+      const endDate   = (request.params.arguments?.endDate   as string) || today;
+      const groupBy   = (request.params.arguments?.groupBy   as string) === "monthday" ? "monthday" : "weekday";
+
+      if (groupBy === "weekday") {
+        const rows = await runQuery<any>(
+          `SELECT strftime('%w', timestamp) as dow,
+                  COUNT(DISTINCT date(timestamp)) as days_sampled,
+                  SUM(CASE WHEN type = 'OUTGOING' THEN amount ELSE 0 END) as total_out,
+                  COUNT(CASE WHEN type = 'OUTGOING' THEN 1 END) as tx_count
+           FROM transactions
+           WHERE date(timestamp) >= ? AND date(timestamp) <= ?
+           GROUP BY dow ORDER BY dow`,
+          [startDate, endDate]
+        );
+
+        const DOW_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+        const allDow = Array.from({ length: 7 }, (_, i) => {
+          const r = rows.find((row: any) => Number(row.dow) === i);
+          return { label: DOW_LABELS[i], days: r?.days_sampled ?? 0, total: r?.total_out ?? 0, txns: r?.tx_count ?? 0 };
+        });
+
+        const avgPerDay = allDow.map(d => d.days > 0 ? d.total / d.days : 0);
+        const maxAvg    = Math.max(...avgPerDay, 1);
+
+        let text = `Day-of-week spending patterns (${startDate} → ${endDate}):\n\n`;
+        allDow.forEach((d, i) => {
+          const avg = avgPerDay[i];
+          const bar = avg > 0 ? "█".repeat(Math.round((avg / maxAvg) * 15)) : "·";
+          text += `${d.label.padEnd(10)} ${fmtAmount(avg).padStart(10)}/day  ${bar}\n`;
+        });
+
+        const maxDay = allDow.reduce((a, b, i) => avgPerDay[i] > avgPerDay[a] ? i : a, 0);
+        const minDay = allDow.filter((_, i) => avgPerDay[i] > 0).reduce((a, b, i) => {
+          const ri = allDow.indexOf(allDow.filter((_, j) => avgPerDay[j] > 0)[i]);
+          return avgPerDay[ri] < avgPerDay[a] ? ri : a;
+        }, maxDay);
+
+        if (avgPerDay[minDay] > 0 && avgPerDay[maxDay] > avgPerDay[minDay]) {
+          const ratio = (avgPerDay[maxDay] / avgPerDay[minDay]).toFixed(1);
+          text += `\nYou spend ${ratio}x more on ${allDow[maxDay].label}s than ${allDow[minDay].label}s.`;
+        }
+
+        return { content: [{ type: "text", text }] };
+      } else {
+        // Day of month
+        const rows = await runQuery<any>(
+          `SELECT CAST(strftime('%d', timestamp) AS INTEGER) as dom,
+                  COUNT(DISTINCT date(timestamp)) as days_sampled,
+                  SUM(CASE WHEN type = 'OUTGOING' THEN amount ELSE 0 END) as total_out
+           FROM transactions
+           WHERE date(timestamp) >= ? AND date(timestamp) <= ?
+           GROUP BY dom ORDER BY dom`,
+          [startDate, endDate]
+        );
+
+        const maxTotal = Math.max(...rows.map((r: any) => r.total_out), 1);
+        let text = `Day-of-month spending patterns (${startDate} → ${endDate}):\n\n`;
+        rows.forEach((r: any) => {
+          const bar = r.total_out > 0 ? "█".repeat(Math.round((r.total_out / maxTotal) * 15)) : "·";
+          text += `Day ${String(r.dom).padStart(2)}  ${fmtAmount(r.total_out / r.days_sampled).padStart(10)}/day  ${bar}\n`;
+        });
+
+        return { content: [{ type: "text", text }] };
+      }
+    }
+
     throw new Error(`Unknown tool: ${request.params.name}`);
   } catch (error: any) {
     return {
@@ -1096,7 +1452,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("Fold MCP Server v4.0.0 running on stdio");
+  console.error("Fold MCP Server v5.0.0 running on stdio");
 }
 
 main().catch((error) => {
