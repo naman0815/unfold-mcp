@@ -26,12 +26,12 @@ STEP 1 — Detect my operating system:
   On macOS: `uname -s` returns "Darwin"
   On Windows: use `$env:OS` in PowerShell, which returns "Windows_NT"
 
-  Save the result — every subsequent step should use the correct OS-specific commands.
+  Save the result — every subsequent step must use the correct OS-specific commands.
 
 ─────────────────────────────────────────
 
 STEP 2 — Clone the repository into the current directory:
-  Run: git clone https://github.com/naman0815/fold-mcp .
+  Run: git clone --depth 1 https://github.com/naman0815/fold-mcp .
   (git is pre-installed on modern macOS and Windows 10+. If it is missing, install it first:
     macOS: brew install git
     Windows: winget install --id Git.Git -e)
@@ -41,15 +41,20 @@ STEP 2 — Clone the repository into the current directory:
 STEP 3 — Install system dependencies if missing. Check and install each:
 
   ── macOS ──────────────────────────────
-  a) Homebrew:
+  a) Xcode Command Line Tools (required by the sqlite3 native module):
+       Check: xcode-select -p
+       Install (if missing): xcode-select --install
+       Wait for the installation to finish before continuing.
+
+  b) Homebrew:
        Check: command -v brew
        Install: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
-  b) Node.js (v18+):
+  c) Node.js (v18+):
        Check: node --version
        Install: brew install node
 
-  c) Go (v1.20+):
+  d) Go (v1.20+):
        Check: go version
        Install: brew install go
 
@@ -61,6 +66,7 @@ STEP 3 — Install system dependencies if missing. Check and install each:
   b) Node.js (v18+):
        Check: node --version
        Install: winget install --id OpenJS.NodeJS -e
+       After installing, close and reopen the terminal so PATH updates take effect.
 
   c) Go (v1.20+):
        Check: go version
@@ -99,36 +105,43 @@ STEP 6 — Authenticate with my Fold account:
 
 STEP 7 — Configure Claude Desktop to use the MCP server:
 
+  First, detect the full absolute path to the node binary:
+    macOS:   Run `which node` and save the output (e.g. /opt/homebrew/bin/node)
+    Windows: Run `(Get-Command node).Source` in PowerShell and save the output
+
+  You MUST use this full path as the "command" value — Claude Desktop does not
+  inherit the user's PATH, so a bare "node" will not work.
+
   The config file path is:
     macOS:   ~/Library/Application Support/Claude/claude_desktop_config.json
     Windows: %APPDATA%\Claude\claude_desktop_config.json
 
   Read the current file (create it if it does not exist).
-  Add a "fold" entry under "mcpServers" using the ABSOLUTE PATH to the current directory.
-  Use the correct path style for the OS (forward slashes on macOS, escaped backslashes or
-  forward slashes on Windows).
+  Add a "fold" entry under "mcpServers" using:
+    - The FULL PATH to node as "command" (from the which/Get-Command step above)
+    - The ABSOLUTE PATH to fold-mcp/build/index.js in the current directory as the arg
 
-  Example for macOS (replace <DIR> with the real absolute path):
+  Example for macOS (replace paths with the real values you detected):
   {
     "mcpServers": {
       "fold": {
-        "command": "node",
-        "args": ["<DIR>/fold-mcp/build/index.js"]
+        "command": "/opt/homebrew/bin/node",
+        "args": ["/Users/yourname/fold-ai/fold-mcp/build/index.js"]
       }
     }
   }
 
-  Example for Windows (replace <DIR> with the real absolute path, e.g. C:\\Users\\name\\fold-ai):
+  Example for Windows (replace paths with the real values you detected):
   {
     "mcpServers": {
       "fold": {
-        "command": "node",
-        "args": ["<DIR>/fold-mcp/build/index.js"]
+        "command": "C:\\Program Files\\nodejs\\node.exe",
+        "args": ["C:\\Users\\yourname\\fold-ai\\fold-mcp\\build\\index.js"]
       }
     }
   }
 
-  If the file already has other mcpServers, merge the "fold" entry in — do not overwrite existing entries.
+  If the file already has other mcpServers entries, merge the "fold" entry in — do not overwrite existing entries.
   Write the final JSON back to the config file.
 
   If you cannot write to this file automatically, print the exact JSON I need to paste
@@ -140,8 +153,9 @@ STEP 8 — Confirm setup is complete and tell me to:
   1. Fully quit and relaunch Claude Desktop.
      macOS: Cmd+Q, then reopen from Applications.
      Windows: Right-click the tray icon → Quit, then reopen from Start Menu.
-  2. Once relaunched, ask Claude: "Sync my Fold data from 2015-01-01"
+  2. Once relaunched, ask Claude: "Sync my Fold data from 2021-01-01 to today"
      This will pull my full transaction history into the local database.
+     (Each year syncs in ~10s and up to 3 years run in parallel.)
 
 ─────────────────────────────────────────
 

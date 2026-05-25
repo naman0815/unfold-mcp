@@ -1,93 +1,175 @@
-# Fold AI — Local MCP Server & Companion
+# fold-mcp
 
-A private, local Model Context Protocol (MCP) server that connects directly to your Fold expenses, allowing you to seamlessly query, analyze, and visualize your spending data from Claude Desktop or any compatible MCP client.
-
----
-
-## Architecture Overview
-
-This project is built to be 100% local, secure, and private. It consists of:
-
-1. **SQLite Database (`db.sqlite`)**: The local storage containing all your normalized transaction history and custom category tags.
-2. **`unfold_cli`**: A Go-based command line tool that communicates with Fold's v3 API to pull transaction records, parse custom tags, and sync them to your local database.
-3. **`fold-mcp`**: A Node/TypeScript-based MCP server that exposes local tools to Claude, allowing the model to perform semantic search, spending summaries, and on-demand database sync.
+A local MCP server for [Fold](https://fold.money) that lets you query and analyze your spending data directly from Claude. Everything runs on your machine — no data leaves your computer.
 
 ---
 
-## Setup & Installation
+## Quick Setup (one prompt)
 
-### 1. Compile the MCP Server
-Navigate to the `fold-mcp` directory and build the server:
+The easiest way to get started: create an empty folder, open Claude Code inside it, and paste the prompt from [bootstrap_claude_code.md](./bootstrap_claude_code.md). Claude will clone the repo, install dependencies, build everything, log you in, and configure Claude Desktop automatically. The only things you type are your phone number and the OTP.
+
+---
+
+## Manual Setup
+
+### Requirements
+
+- Node.js v18+
+- Go 1.20+
+- [Claude Desktop](https://claude.ai/download)
+- A Fold account (India only)
+
+### 1. Clone and build
+
 ```bash
+git clone https://github.com/naman0815/fold-mcp.git
 cd fold-mcp
-npm install
-npm run build
+
+# Build the MCP server
+cd fold-mcp && npm install && npm run build && cd ..
+
+# Build the Go CLI
+cd unfold_cli && go build -o ../unfold_patched . && cd ..
 ```
 
-This compiles the TypeScript code into the production bundle at `fold-mcp/build/index.js`.
+> **macOS note:** `npm install` compiles a native SQLite binding. If it fails, run `xcode-select --install` first.
 
-### 2. Configure Claude Desktop
-Add the MCP server configuration to your Claude Desktop config file:
+### 2. Log in to Fold
 
-**File path on macOS:**
-`~/Library/Application Support/Claude/claude_desktop_config.json`
+```bash
+./unfold_patched login
+```
 
-**Configuration:**
+You'll be prompted for your phone number and an OTP. Tokens are stored at `~/.config/unfold/config.yaml`.
+
+### 3. Configure Claude Desktop
+
+Find your config file:
+- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+
+Add the `fold` entry under `mcpServers`:
+
 ```json
 {
   "mcpServers": {
     "fold": {
       "command": "/opt/homebrew/bin/node",
-      "args": [
-        "/Users/namanganapathi/Documents/fold-ai/fold-mcp/build/index.js"
-      ]
+      "args": ["/absolute/path/to/fold-mcp/fold-mcp/build/index.js"]
     }
   }
 }
 ```
-*(Make sure the path to `node` matches your local environment; run `which node` to verify.)*
+
+Use the full path to `node` (run `which node` on macOS or `(Get-Command node).Source` on Windows). A bare `"node"` won't work because Claude Desktop doesn't inherit your shell's PATH.
+
+Quit and relaunch Claude Desktop to pick up the new config.
+
+### 4. Sync your transaction history
+
+Ask Claude:
+
+> Sync my Fold data from 2021-01-01 to today
+
+This pulls your full history into a local SQLite database. Each year syncs in about 10 seconds and up to 3 years run in parallel.
 
 ---
 
-## Exposed MCP Tools
+## Staying up to date
 
-Once installed, Claude will have access to the following tools:
+When new features are pushed, anyone who cloned the repo can update by running:
 
-### 1. `sync_fold_data`
-Synchronize transaction records from the Fold API into your local `db.sqlite`.
-- **Arguments**:
-  - `since` (optional, format: `YYYY-MM-DD`): Sync historical transactions from the specified date forward. If omitted, defaults to only fetching the last day's data.
+```bash
+git pull
+cd fold-mcp && npm run build
+```
 
-### 2. `get_recent_transactions`
-Retrieve the latest transaction records.
-- **Arguments**:
-  - `limit` (optional, default: `20`): Maximum number of transactions to return.
-
-### 3. `search_transactions`
-Perform fine-grained search and filtering on your transactions.
-- **Arguments**:
-  - `query` (optional): Text search matches description, categories, tags, notes.
-  - `startDate` / `endDate` (optional, format: `YYYY-MM-DD`): Limit search within a date range.
-  - `category` (optional): Filter by transaction category.
-  - `tag` (optional): Filter by custom Fold tags.
-
-### 4. `get_spending_summary`
-Request spending aggregates grouped by category or tag.
-- **Arguments**:
-  - `startDate` / `endDate` (optional, format: `YYYY-MM-DD`): The timeframe to summarize.
+Or ask Claude directly: **"Are there any updates available?"** — the `check_for_updates` tool will fetch from GitHub and tell you how many commits behind you are and the exact command to run.
 
 ---
 
-## Syncing Historical Data
+## Available Tools
 
-To sync your entire history of Fold usage:
-1. Open Claude.
-2. Ask Claude: `"Sync my Fold data from the beginning of my usage, e.g., 2015-01-01"` or run the `sync_fold_data` tool with the appropriate `since` date.
-3. This runs the patched `unfold_cli` behind the scenes, populating `db.sqlite` with all historical transactions.
+Once installed, Claude has access to these tools:
+
+**Data & sync**
+
+| Tool | What it does |
+|---|---|
+| `get_sync_status` | Check how fresh your local data is before asking questions |
+| `sync_fold_data` | Pull transactions from Fold into the local database |
+| `check_for_updates` | Check if a newer version of fold-mcp is available on GitHub |
+
+**Transactions**
+
+| Tool | What it does |
+|---|---|
+| `get_recent_transactions` | Get the most recent N transactions |
+| `search_transactions` | Filter by merchant, narration, tag, date range, amount, mode, or type |
+
+**Spending analysis**
+
+| Tool | What it does |
+|---|---|
+| `get_spending_summary` | Income vs spending with top merchants and daily average |
+| `get_merchant_summary` | Top merchants by total spend or transaction count |
+| `get_monthly_trend` | Month-by-month income, spending, and net cash flow |
+| `get_balance_history` | Average account balance by month |
+| `get_spending_by_mode` | Breakdown by payment mode (CARD, UPI, NEFT, etc.) |
+| `get_category_breakdown` | Spending grouped into categories: Food Delivery, Transport, Shopping, etc. |
+| `get_unusual_transactions` | Charges that are way above your normal spend at a merchant |
+
+**Routines & check-ins**
+
+| Tool | What it does |
+|---|---|
+| `get_weekly_digest` | 7-day summary vs your rolling average, with unusual charge alerts |
+| `get_tax_year_report` | Full April–March financial year report (income, spending, savings rate) |
+| `get_spending_streak` | How many consecutive days you've stayed under a daily spending limit |
+
+### Example questions to ask Claude
+
+- "What did I spend last month?"
+- "How much have I spent on Swiggy this year?"
+- "Show me my top 10 merchants since January"
+- "Is my data up to date?"
+- "Give me my weekly digest"
+- "Are there any unusual charges in the last 3 months?"
+- "Show me my FY 2024-25 report"
+- "Break my spending down by category for this month"
+- "How's my spending streak this week?"
+- "Are there any updates available?"
 
 ---
 
-## Security & Privacy (Scenario A)
+## How it works
 
-- **100% Local Execution**: All transaction history, tokens, and database files remain locally on your physical machine in `/Users/namanganapathi/Documents/fold-ai/db.sqlite`.
-- **Shared Accounts Safe**: Even if you share your Claude account credentials with friends/family, **they will not see your spending data** unless they are physically using your specific computer or have access to your local file system. Because Claude Desktop runs MCP servers *locally*, their own Claude Desktop apps will attempt to run the MCP server on *their* computers and fail (or query their own local database if they have one), ensuring absolute separation.
+```
+Claude Desktop
+    |
+    | MCP (stdio)
+    v
+fold-mcp/build/index.js      — Node.js process, read-only SQLite access
+    |
+    +-- SQLite reads -------> db.sqlite
+    |
+    +-- shell exec ---------> unfold_patched transactions -d --since X --till Y
+                                    |
+                                    | HTTPS (Bearer token)
+                                    v
+                              api.fold.money
+                                    |
+                                    v
+                              db.sqlite  (upsert by transaction UUID)
+```
+
+The MCP server only reads from SQLite. All writes go through the Go CLI, which handles auth token refresh automatically before every sync.
+
+---
+
+## Privacy
+
+- Everything runs locally. No data is sent to any third-party service.
+- `db.sqlite` is gitignored and never leaves your machine.
+- Auth tokens live at `~/.config/unfold/config.yaml`, scoped to your OS user.
+- If you share a Claude account with others, they cannot see your spending data because MCP servers run locally on each person's own computer.
