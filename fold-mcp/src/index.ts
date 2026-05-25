@@ -76,6 +76,12 @@ async function initFts(): Promise<void> {
 }
 
 async function rebuildFtsIfStale(): Promise<void> {
+  // Skip gracefully if transactions table doesn't exist yet (pre-first-sync)
+  const [tableCheck] = await runQuery<any>(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name='transactions'`
+  );
+  if (!tableCheck) return;
+
   const [ftsRow]  = await runFtsQuery<any>(`SELECT COUNT(*) as cnt FROM tx_fts`);
   const [mainRow] = await runQuery<any>(`SELECT COUNT(*) as cnt FROM transactions`);
   if ((ftsRow?.cnt ?? 0) >= (mainRow?.cnt ?? 0)) return;
