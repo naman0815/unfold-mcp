@@ -89,15 +89,28 @@ STEP 5 — Build the unfold Go CLI:
 ─────────────────────────────────────────
 
 STEP 6 — Authenticate with my Fold account:
-  macOS:   ./unfold_patched login
-  Windows: .\unfold_patched.exe login
+  DO NOT run the login binary without flags — it is interactive and will hang.
+  Use the two-step non-interactive flow below:
 
-  This will prompt me to enter:
-    1. My phone number (without country code, e.g. 9876543210)
-    2. The OTP Fold sends to that number via SMS
+  6a) Ask me: "What is your Fold-registered mobile number? (digits only, no country code, e.g. 9876543210)"
+      Wait for my reply. Save it as PHONE.
 
-  Wait for me to complete the login before proceeding.
-  My session token is saved to ~/.config/unfold/config.yaml automatically.
+  6b) Send the OTP — this command exits immediately after triggering the SMS:
+        macOS:   ./unfold_patched login --phone PHONE --send-otp
+        Windows: .\unfold_patched.exe login --phone PHONE --send-otp
+      (substitute the real number I gave you)
+      You will see "OTP sent successfully." — the command returns at once.
+
+  6c) Ask me: "Check your phone — what OTP did you receive?"
+      Wait for my reply. Save it as OTP.
+
+  6d) Verify the OTP — fully non-interactive:
+        macOS:   ./unfold_patched login --phone PHONE --otp OTP
+        Windows: .\unfold_patched.exe login --phone PHONE --otp OTP
+
+  If 6d) prints "Login successful !" (exit code 0), my session token is saved to
+  ~/.config/unfold/config.yaml automatically. Proceed to Step 7.
+  If it fails, tell me the exact error and stop.
 
 ─────────────────────────────────────────
 

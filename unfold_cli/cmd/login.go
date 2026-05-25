@@ -22,11 +22,13 @@ var LoginCmd = &cobra.Command{
 func init() {
 	LoginCmd.Flags().StringP("phone", "p", "", "Phone number (without +91 prefix)")
 	LoginCmd.Flags().StringP("otp", "o", "", "OTP received via SMS (requires --phone)")
+	LoginCmd.Flags().Bool("send-otp", false, "Send OTP to phone and exit immediately (non-interactive; use with --phone)")
 }
 
 func loginCmdHandler(cmd *cobra.Command, args []string) {
 	phoneFlag, _ := cmd.Flags().GetString("phone")
 	otpFlag, _ := cmd.Flags().GetString("otp")
+	sendOtpOnly, _ := cmd.Flags().GetBool("send-otp")
 
 	var phoneNum string
 	if phoneFlag != "" {
@@ -36,6 +38,17 @@ func loginCmdHandler(cmd *cobra.Command, args []string) {
 		phone := bufio.NewScanner(os.Stdin)
 		phone.Scan()
 		phoneNum = phone.Text()
+	}
+
+	// --send-otp: trigger OTP dispatch and exit immediately (no stdin blocking)
+	if sendOtpOnly {
+		err := api.Login("+91" + phoneNum)
+		if err != nil {
+			log.Error().Err(err).Msg("Login response: ")
+			runtime.Goexit()
+		}
+		fmt.Println("OTP sent successfully.")
+		return
 	}
 
 	// If --otp is not provided, request OTP first
