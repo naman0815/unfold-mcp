@@ -14,14 +14,16 @@ import { fileURLToPath } from "url";
 // ─── Paths ───────────────────────────────────────────────────────────────────
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const dbPath = path.resolve(__dirname, "..", "..", "db.sqlite");
+const dbPath    = path.resolve(__dirname, "..", "..", "db.sqlite");
+const ftsDbPath = path.resolve(__dirname, "..", "..", "db_fts.sqlite");
 const cliPath = path.resolve(__dirname, "..", "..",
   process.platform === "win32" ? "unfold_patched.exe" : "unfold_patched"
 );
 const cliDir  = path.resolve(__dirname, "..", "..");
 
 // ─── SQLite ───────────────────────────────────────────────────────────────────
-const db = new sqlite3.Database(dbPath, sqlite3.OPEN_READONLY);
+const db    = new sqlite3.Database(dbPath,    sqlite3.OPEN_READONLY);
+const ftsDb = new sqlite3.Database(ftsDbPath, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE);
 
 function runQuery<T>(query: string, params: any[] = []): Promise<T[]> {
   return new Promise((resolve, reject) => {
@@ -30,6 +32,120 @@ function runQuery<T>(query: string, params: any[] = []): Promise<T[]> {
       else resolve(rows as T[]);
     });
   });
+}
+
+function runFtsQuery<T>(query: string, params: any[] = []): Promise<T[]> {
+  return new Promise((resolve, reject) => {
+    ftsDb.all(query, params, (err, rows) => {
+      if (err) reject(err);
+      else resolve(rows as T[]);
+    });
+  });
+}
+
+function runFtsExec(query: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    ftsDb.exec(query, (err) => { if (err) reject(err); else resolve(); });
+  });
+}
+
+// ─── FTS index setup ─────────────────────────────────────────────────────────
+async function initFts(): Promise<void> {
+  await runFtsExec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS tx_fts USING fts5(
+      uuid UNINDEXED,
+      merchant,
+      narration,
+      summary,
+      tokenize='porter unicode61'
+    )
+  `);
+  await rebuildFtsIfStale();
+}
+
+async function rebuildFtsIfStale(): Promise<void> {
+  const [ftsRow]  = await runFtsQuery<any>(`SELECT COUNT(*) as cnt FROM tx_fts`);
+  const [mainRow] = await runQuery<any>(`SELECT COUNT(*) as cnt FROM transactions`);
+  if ((ftsRow?.cnt ?? 0) >= (mainRow?.cnt ?? 0)) return;
+
+  const rows = await runQuery<any>(
+    `SELECT uuid, COALESCE(merchant,'') as merchant,
+            COALESCE(narration,'') as narration,
+            COALESCE(summary,'') as summary
+     FROM transactions`
+  );
+
+  await runFtsExec(`DELETE FROM tx_fts`);
+  await new Promise<void>((resolve, reject) => {
+    ftsDb.serialize(() => {
+      ftsDb.run("BEGIN");
+      const stmt = ftsDb.prepare(
+        `INSERT INTO tx_fts(uuid, merchant, narration, summary) VALUES (?,?,?,?)`
+      );
+      for (const r of rows) stmt.run([r.uuid, r.merchant, r.narration, r.summary]);
+      stmt.finalize();
+      ftsDb.run("COMMIT", (err) => { if (err) reject(err); else resolve(); });
+    });
+  });
+  console.error(`FTS index built: ${rows.length} rows`);
+}
+
+function toFtsQuery(q: string): string {
+  if (/["*]|\b(?:AND|OR|NOT)\b/.test(q)) return q;
+  return q.trim().split(/\s+/).filter(Boolean).map((w) => `${w}*`).join(" ");
+}
+
+// ─── Merchant name normalisation ─────────────────────────────────────────────
+const MERCHANT_OVERRIDES: Record<string, string> = {
+  "SWIGGY": "Swiggy", "ZOMATO": "Zomato", "BLINKIT": "Blinkit",
+  "ZEPTO": "Zepto", "BIGBASKET": "BigBasket", "DUNZO": "Dunzo",
+  "AMAZON": "Amazon", "FLIPKART": "Flipkart", "MYNTRA": "Myntra",
+  "AJIO": "AJIO", "NYKAA": "Nykaa", "MEESHO": "Meesho",
+  "NETFLIX": "Netflix", "SPOTIFY": "Spotify", "YOUTUBE": "YouTube",
+  "HOTSTAR": "Hotstar", "BOOKMYSHOW": "BookMyShow",
+  "UBER": "Uber", "OLA": "Ola", "RAPIDO": "Rapido",
+  "PHONEPE": "PhonePe", "PAYTM": "Paytm", "GPAY": "Google Pay",
+  "GOOGLE PAY": "Google Pay", "CRED": "CRED",
+  "ZERODHA": "Zerodha", "GROWW": "Groww", "UPSTOX": "Upstox",
+  "HDFC BANK": "HDFC Bank", "ICICI BANK": "ICICI Bank",
+  "AXIS BANK": "Axis Bank", "SBI YONO": "SBI (YONO)",
+  "KOTAK MAHINDRA": "Kotak Bank", "INDUSIND BANK": "IndusInd Bank",
+  "AIRTEL": "Airtel", "JIO": "Jio", "VODAFONE": "Vodafone",
+  "IRCTC": "IRCTC", "MAKEMYTRIP": "MakeMyTrip", "REDBUS": "redBus",
+};
+
+function cleanMerchant(name: string): string {
+  if (!name) return name;
+  const trimmed = name.trim();
+  const upper   = trimmed.toUpperCase();
+
+  // Exact override
+  if (MERCHANT_OVERRIDES[upper]) return MERCHANT_OVERRIDES[upper];
+
+  // Prefix override (e.g. "SWIGGY INSTAMART" → "Swiggy Instamart")
+  for (const [key, val] of Object.entries(MERCHANT_OVERRIDES)) {
+    if (upper.startsWith(key + " ") || upper.startsWith(key + "_")) {
+      const suffix = trimmed.slice(key.length);
+      const cleanSuffix = /^[A-Z0-9 _]+$/.test(suffix.trim())
+        ? suffix.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
+        : suffix;
+      return val + cleanSuffix;
+    }
+  }
+
+  // Strip legal suffixes
+  let out = trimmed
+    .replace(/\s+PRIVATE\s+LIMITED$/i, "")
+    .replace(/\s+PVT\.?\s*LTD\.?$/i, "")
+    .replace(/\s+LIMITED$/i, "")
+    .trim();
+
+  // Title-case if still entirely uppercase and longer than 3 chars
+  if (out.length > 3 && /^[A-Z0-9 ]+$/.test(out)) {
+    out = out.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+
+  return out;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -52,7 +168,7 @@ function parseTags(raw: string | null): string[] {
 function formatTransaction(t: any): string {
   const tags = parseTags(t.tags);
   const tagsStr = tags.length > 0 ? ` [Tags: ${tags.join(", ")}]` : "";
-  const merchant = truncate(t.merchant || t.narration || "Unknown");
+  const merchant = truncate(cleanMerchant(t.merchant || t.narration || "Unknown"));
   const sign = t.type === "INCOMING" ? "+" : "-";
   const modeStr = t.mode ? ` | ${t.mode}` : "";
   return `${(t.timestamp as string).slice(0, 10)} | ${sign}${fmtAmount(t.amount)} | ${merchant}${modeStr}${tagsStr} [ID: ${t.uuid}]`;
@@ -414,9 +530,24 @@ const GET_DAY_OF_WEEK_PATTERNS_TOOL: Tool = {
   }
 };
 
+const FULL_TEXT_SEARCH_TOOL: Tool = {
+  name: "full_text_search",
+  description: "Fast full-text search across merchant name, bank narration, and the natural-language transaction summary. Supports partial words, multi-term queries, and boolean operators (AND, OR, NOT). Use this when you need to find a transaction by any word in its description — e.g. 'coffee', 'salary HDFC', 'zomato NOT swiggy'.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      query:     { type: "string", description: "Search terms. Partial words are matched automatically (e.g. 'swi' matches 'Swiggy'). Use AND/OR/NOT for boolean logic. Use quotes for phrases." },
+      startDate: { type: "string", description: "Filter results from this date (YYYY-MM-DD)." },
+      endDate:   { type: "string", description: "Filter results to this date (YYYY-MM-DD)." },
+      limit:     { type: "number", description: "Max results. Default 30.", default: 30 }
+    },
+    required: ["query"]
+  }
+};
+
 // ─── Server ───────────────────────────────────────────────────────────────────
 const server = new Server(
-  { name: "fold-mcp", version: "5.0.0" },
+  { name: "fold-mcp", version: "6.0.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -442,6 +573,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     GET_SPENDING_FORECAST_TOOL,
     GET_ACCOUNT_BREAKDOWN_TOOL,
     GET_DAY_OF_WEEK_PATTERNS_TOOL,
+    FULL_TEXT_SEARCH_TOOL,
   ],
 }));
 
@@ -607,6 +739,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         lines.push(`Done: ${successCount} succeeded, ${failCount} failed out of ${batches.length} batches.`);
       }
 
+      rebuildFtsIfStale().catch(() => {});
       return { content: [{ type: "text", text: lines.join("\n") }] };
     }
 
@@ -679,7 +812,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const xferNote  = excludeTransfers ? " (transfers excluded)" : "";
       let text = `Top merchants by ${sortLabel} (${startDate} → ${endDate})${xferNote}:\n\n`;
       rows.forEach((r: any, i: number) => {
-        text += `${i + 1}. ${truncate(r.merchant, 45)}\n`;
+        text += `${i + 1}. ${truncate(cleanMerchant(r.merchant), 45)}\n`;
         text += `   ${fmtAmount(r.total)} total | ${r.cnt} txn${r.cnt === 1 ? "" : "s"} | ${fmtAmount(r.avg)} avg\n`;
       });
 
@@ -927,7 +1060,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       if (topMerchants.length > 0) {
         text += `\nTop merchants:\n`;
         topMerchants.forEach((m: any, i: number) => {
-          text += `  ${i + 1}. ${truncate(m.merchant, 35).padEnd(37)} ${fmtAmount(m.total)}  (${m.cnt} txns)\n`;
+          text += `  ${i + 1}. ${truncate(cleanMerchant(m.merchant), 35).padEnd(37)} ${fmtAmount(m.total)}  (${m.cnt} txns)\n`;
         });
       }
 
@@ -1203,7 +1336,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       let text = `Recurring merchants (${startDate} → ${endDate}, appearing in ${minMonths}+ months):\n\n`;
       rows.forEach((r: any, i: number) => {
-        text += `${i + 1}. ${truncate(r.merchant, 40)}\n`;
+        text += `${i + 1}. ${truncate(cleanMerchant(r.merchant), 40)}\n`;
         text += `   ${r.months_active} months | ${fmtAmount(r.avg_amount)}/time avg | ${fmtAmount(r.total_spent)} total | ${r.total_transactions} txns\n`;
         text += `   Active: ${r.first_seen} → ${r.last_seen}\n`;
       });
@@ -1440,6 +1573,78 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
     }
 
+    // ── full_text_search ─────────────────────────────────────────────────────
+    if (request.params.name === "full_text_search") {
+      const query     = (request.params.arguments?.query as string) || "";
+      const startDate = request.params.arguments?.startDate as string | undefined;
+      const endDate   = request.params.arguments?.endDate   as string | undefined;
+      const limit     = Math.min(Number(request.params.arguments?.limit ?? 30), 200);
+
+      if (!query.trim()) {
+        return { content: [{ type: "text", text: "Please provide a search query." }] };
+      }
+
+      let uuids: string[];
+
+      try {
+        const ftsQ = toFtsQuery(query);
+        const ftsRows = await runFtsQuery<any>(
+          `SELECT uuid FROM tx_fts WHERE tx_fts MATCH ? ORDER BY rank LIMIT ?`,
+          [ftsQ, limit * 3]
+        );
+        uuids = ftsRows.map((r: any) => r.uuid as string);
+      } catch {
+        // FTS unavailable — fall back to LIKE search across all three text columns
+        const like = `%${query}%`;
+        const fallbackRows = await runQuery<any>(
+          `SELECT uuid FROM transactions
+           WHERE (merchant LIKE ? OR narration LIKE ? OR summary LIKE ?)
+           ORDER BY timestamp DESC LIMIT ?`,
+          [like, like, like, limit]
+        );
+        uuids = fallbackRows.map((r: any) => r.uuid as string);
+      }
+
+      if (!uuids.length) {
+        return { content: [{ type: "text", text: `No transactions matched "${query}".` }] };
+      }
+
+      // Fetch full rows from main DB, apply date filters, preserve FTS ranking order
+      const placeholders = uuids.map(() => "?").join(",");
+      const dateConditions: string[] = [];
+      const dateParams: any[] = [];
+      if (startDate) { dateConditions.push("date(timestamp) >= ?"); dateParams.push(startDate); }
+      if (endDate)   { dateConditions.push("date(timestamp) <= ?"); dateParams.push(endDate); }
+      const dateWhere = dateConditions.length ? ` AND ${dateConditions.join(" AND ")}` : "";
+
+      const rows = await runQuery<any>(
+        `SELECT uuid, amount, timestamp, type, merchant, narration, mode, tags
+         FROM transactions
+         WHERE uuid IN (${placeholders})${dateWhere}`,
+        [...uuids, ...dateParams]
+      );
+
+      // Re-sort by FTS rank (uuids order) then by date within same rank
+      const uuidRank = new Map(uuids.map((id, i) => [id, i]));
+      rows.sort((a: any, b: any) => {
+        const rankDiff = (uuidRank.get(a.uuid) ?? 999) - (uuidRank.get(b.uuid) ?? 999);
+        if (rankDiff !== 0) return rankDiff;
+        return (b.timestamp as string).localeCompare(a.timestamp as string);
+      });
+
+      const displayed = rows.slice(0, limit);
+      const note = rows.length > limit ? `\n(showing top ${limit} of ${rows.length} matches)` : "";
+      const dateNote = (startDate || endDate) ? ` | date filter: ${startDate ?? "any"} → ${endDate ?? "any"}` : "";
+
+      return {
+        content: [{
+          type: "text",
+          text: `Full-text search: "${query}"${dateNote} — ${displayed.length} result${displayed.length !== 1 ? "s" : ""}${note}\n\n` +
+                displayed.map(formatTransaction).join("\n")
+        }]
+      };
+    }
+
     throw new Error(`Unknown tool: ${request.params.name}`);
   } catch (error: any) {
     return {
@@ -1450,9 +1655,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 });
 
 async function main() {
+  await initFts();
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("Fold MCP Server v5.0.0 running on stdio");
+  console.error("Fold MCP Server v6.0.0 running on stdio");
 }
 
 main().catch((error) => {
