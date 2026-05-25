@@ -86,6 +86,12 @@ STEP 5 — Build the unfold Go CLI:
   Windows (PowerShell):
     cd unfold_cli; go build -o ../unfold_patched.exe .; cd ..
 
+  Verify the binary works:
+    macOS:   ./unfold_patched login --help
+    Windows: .\unfold_patched.exe login --help
+  You must see --send-otp listed in the flags. If it is missing, the binary
+  did not build from the latest source — stop and check the build output for errors.
+
 ─────────────────────────────────────────
 
 STEP 6 — Authenticate with my Fold account:
