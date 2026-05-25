@@ -1,9 +1,10 @@
 {
+  "_comment": "Template only — do not copy directly. The bootstrap prompt generates the correct config for your machine with absolute paths.",
   "mcpServers": {
     "fold": {
-      "command": "node",
+      "command": "/path/to/node",
       "args": [
-        "/Users/namanganapathi/Documents/fold-ai/fold-mcp/build/index.js"
+        "/absolute/path/to/fold-ai/fold-mcp/build/index.js"
       ]
     }
   }
