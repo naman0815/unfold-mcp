@@ -123,6 +123,46 @@ async function runBatchesConcurrent(
   await Promise.all(Array.from({ length: Math.min(concurrency, batches.length) }, worker));
 }
 
+// ─── Shell helper (for git commands) ─────────────────────────────────────────
+function runCommand(cmd: string, cwd: string, timeoutMs = 15_000): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = exec(cmd, { cwd });
+    let stdout = "", stderr = "";
+    child.stdout?.on("data", (d) => { stdout += d; });
+    child.stderr?.on("data", (d) => { stderr += d; });
+    const timer = setTimeout(() => { child.kill(); reject(new Error(`timed out: ${cmd}`)); }, timeoutMs);
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve(stdout.trim());
+      else reject(new Error(stderr.trim() || `exit code ${code}`));
+    });
+  });
+}
+
+// ─── Merchant categorisation ──────────────────────────────────────────────────
+const CATEGORY_MAP: { category: string; keywords: string[] }[] = [
+  { category: "Food Delivery",    keywords: ["swiggy", "zomato"] },
+  { category: "Quick Commerce",   keywords: ["blinkit", "zepto", "dunzo", "instamart", "bigbasket", "grofers"] },
+  { category: "Transport",        keywords: ["uber", "ola", "rapido", "metro"] },
+  { category: "Travel",           keywords: ["irctc", "redbus", "makemytrip", "goibibo", "yatra", "cleartrip", "indigo", "spicejet", "air india", "easemytrip", "airasia", "vistara"] },
+  { category: "Entertainment",    keywords: ["netflix", "hotstar", "amazon prime", "spotify", "youtube", "pvr", "inox", "bookmyshow", "disney", "jiocinema"] },
+  { category: "Telecom",          keywords: ["airtel", "jio", "vodafone", " vi ", "bsnl", "act broadband"] },
+  { category: "Shopping",         keywords: ["amazon", "flipkart", "myntra", "ajio", "nykaa", "meesho", "tatacliq", "snapdeal"] },
+  { category: "Health & Fitness", keywords: ["apollo", "1mg", "practo", "netmeds", "medplus", "cult.fit", "gym"] },
+  { category: "Investing",        keywords: ["zerodha", "groww", "upstox", "smallcase", "kuvera", "paytm money"] },
+  { category: "Education",        keywords: ["udemy", "coursera", "unacademy", "byju", "vedantu", "duolingo"] },
+  { category: "Fuel",             keywords: ["petrol", "bpcl", "hpcl", "iocl", "nayara"] },
+  { category: "Utilities",        keywords: ["electricity", "water bill", "bescom", "tata power", "adani electricity", "mahanagar gas"] },
+];
+
+function categorize(merchant: string): string {
+  const lower = merchant.toLowerCase();
+  for (const { category, keywords } of CATEGORY_MAP) {
+    if (keywords.some((k) => lower.includes(k))) return category;
+  }
+  return "Other";
+}
+
 // ─── Tool Schemas ─────────────────────────────────────────────────────────────
 const GET_RECENT_TRANSACTIONS_TOOL: Tool = {
   name: "get_recent_transactions",
@@ -238,9 +278,76 @@ const GET_SPENDING_BY_MODE_TOOL: Tool = {
   }
 };
 
+const CHECK_FOR_UPDATES_TOOL: Tool = {
+  name: "check_for_updates",
+  description: "Check if a newer version of fold-mcp is available on GitHub. Fetches from remote and reports how many commits behind you are, with the exact command to update.",
+  inputSchema: { type: "object", properties: {} }
+};
+
+const GET_WEEKLY_DIGEST_TOOL: Tool = {
+  name: "get_weekly_digest",
+  description: "7-day spending summary designed for a weekly check-in. Shows total vs your rolling 3-week average, day-by-day breakdown, top merchants, and flags any unusual charges.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      weeksBack: { type: "number", description: "Which week to summarize: 0 = last 7 days, 1 = the week before that, etc. Default 0.", default: 0 }
+    }
+  }
+};
+
+const GET_TAX_YEAR_REPORT_TOOL: Tool = {
+  name: "get_tax_year_report",
+  description: "Full income and spending report for an Indian financial year (April 1 – March 31). Useful for tax filing or year-end review.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      year: { type: "number", description: "The year the FY starts (e.g. 2024 for FY 2024-25). Defaults to the current or most recently completed FY." }
+    }
+  }
+};
+
+const GET_UNUSUAL_TRANSACTIONS_TOOL: Tool = {
+  name: "get_unusual_transactions",
+  description: "Find transactions that are unusually large compared to your normal spend at that merchant. Helps catch unexpected charges or billing errors.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      startDate:  { type: "string", description: "Start date (YYYY-MM-DD). Defaults to 90 days ago." },
+      endDate:    { type: "string", description: "End date (YYYY-MM-DD). Defaults to today." },
+      multiplier: { type: "number", description: "Flag transactions this many times above the merchant average. Default 2.5.", default: 2.5 },
+      minHistory: { type: "number", description: "Minimum past transactions at the merchant needed to compare against. Default 3.", default: 3 },
+      limit:      { type: "number", description: "Max results. Default 20.", default: 20 }
+    }
+  }
+};
+
+const GET_CATEGORY_BREAKDOWN_TOOL: Tool = {
+  name: "get_category_breakdown",
+  description: "Group spending into categories: Food Delivery, Transport, Shopping, Entertainment, etc. Gives a high-level picture of where your money goes.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      startDate: { type: "string", description: "Start date (YYYY-MM-DD). Defaults to 30 days ago." },
+      endDate:   { type: "string", description: "End date (YYYY-MM-DD). Defaults to today." }
+    }
+  }
+};
+
+const GET_SPENDING_STREAK_TOOL: Tool = {
+  name: "get_spending_streak",
+  description: "Track your current streak of days where you spent less than a daily threshold. Also shows your longest streak in the lookback window.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      threshold: { type: "number", description: "Daily spending limit in ₹ to count as a 'good' day. Default 1000.", default: 1000 },
+      lookback:  { type: "number", description: "Days to look back for the longest-streak calculation. Default 90.", default: 90 }
+    }
+  }
+};
+
 // ─── Server ───────────────────────────────────────────────────────────────────
 const server = new Server(
-  { name: "fold-mcp", version: "3.0.0" },
+  { name: "fold-mcp", version: "4.0.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -255,6 +362,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     GET_MONTHLY_TREND_TOOL,
     GET_BALANCE_HISTORY_TOOL,
     GET_SPENDING_BY_MODE_TOOL,
+    CHECK_FOR_UPDATES_TOOL,
+    GET_WEEKLY_DIGEST_TOOL,
+    GET_TAX_YEAR_REPORT_TOOL,
+    GET_UNUSUAL_TRANSACTIONS_TOOL,
+    GET_CATEGORY_BREAKDOWN_TOOL,
+    GET_SPENDING_STREAK_TOOL,
   ],
 }));
 
@@ -601,6 +714,376 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return { content: [{ type: "text", text }] };
     }
 
+    // ── check_for_updates ───────────────────────────────────────────────────
+    if (request.params.name === "check_for_updates") {
+      try {
+        await runCommand("git fetch origin", cliDir);
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `Could not reach remote: ${e.message}\nMake sure you have internet access and git configured.` }] };
+      }
+
+      try {
+        const currentDesc = await runCommand("git describe --tags --always HEAD", cliDir).catch(
+          () => runCommand("git rev-parse --short HEAD", cliDir)
+        );
+        const upstream = await runCommand("git rev-parse --abbrev-ref --symbolic-full-name @{u}", cliDir)
+          .catch(() => "origin/main");
+        const behindStr = await runCommand(`git rev-list HEAD..${upstream} --count`, cliDir);
+        const behind = parseInt(behindStr, 10);
+
+        if (behind === 0) {
+          return { content: [{ type: "text", text: `✅ Already up to date (${currentDesc})` }] };
+        }
+
+        const log = await runCommand(`git log HEAD..${upstream} --oneline --max-count=10`, cliDir);
+        let text = `⬆️  ${behind} new commit${behind === 1 ? "" : "s"} available (you're on ${currentDesc}):\n\n`;
+        text += log + "\n";
+        if (behind > 10) text += `  … and ${behind - 10} more\n`;
+        text += `\nTo update:\n  git pull\n  cd fold-mcp && npm run build`;
+        return { content: [{ type: "text", text }] };
+      } catch (e: any) {
+        return { content: [{ type: "text", text: `Update check failed: ${e.message}` }] };
+      }
+    }
+
+    // ── get_weekly_digest ───────────────────────────────────────────────────
+    if (request.params.name === "get_weekly_digest") {
+      const weeksBack = Math.max(0, Math.min(Number(request.params.arguments?.weeksBack ?? 0), 52));
+      const today = new Date();
+
+      const weekEndMs   = today.getTime() - weeksBack * 7 * 864e5;
+      const weekEndStr   = new Date(weekEndMs).toISOString().slice(0, 10);
+      const weekStartStr = new Date(weekEndMs - 6 * 864e5).toISOString().slice(0, 10);
+
+      // Baseline: 3 prior weeks for rolling average
+      const baselineEndStr   = new Date(weekEndMs - 7 * 864e5).toISOString().slice(0, 10);
+      const baselineStartStr = new Date(weekEndMs - 4 * 7 * 864e5).toISOString().slice(0, 10);
+
+      const weekRows = await runQuery<any>(
+        `SELECT date(timestamp) as day,
+                SUM(CASE WHEN type = 'OUTGOING' THEN amount ELSE 0 END) as outgoing,
+                SUM(CASE WHEN type = 'INCOMING' THEN amount ELSE 0 END) as incoming
+         FROM transactions
+         WHERE date(timestamp) >= ? AND date(timestamp) <= ?
+         GROUP BY day ORDER BY day ASC`,
+        [weekStartStr, weekEndStr]
+      );
+
+      const [baseline] = await runQuery<any>(
+        `SELECT SUM(CASE WHEN type = 'OUTGOING' THEN amount ELSE 0 END) as total_outgoing
+         FROM transactions
+         WHERE date(timestamp) >= ? AND date(timestamp) <= ?`,
+        [baselineStartStr, baselineEndStr]
+      );
+
+      const topMerchants = await runQuery<any>(
+        `SELECT merchant, SUM(amount) as total, COUNT(*) as cnt
+         FROM transactions
+         WHERE type = 'OUTGOING' AND date(timestamp) >= ? AND date(timestamp) <= ?
+           AND merchant IS NOT NULL AND merchant != ''
+         GROUP BY merchant ORDER BY total DESC LIMIT 5`,
+        [weekStartStr, weekEndStr]
+      );
+
+      const ninetyDaysAgo = new Date(today.getTime() - 90 * 864e5).toISOString().slice(0, 10);
+      const unusualRows = await runQuery<any>(
+        `SELECT t.timestamp, t.merchant, t.amount, stats.avg_amount,
+                ROUND(CAST(t.amount AS REAL) / stats.avg_amount, 1) as multiplier
+         FROM transactions t
+         JOIN (
+           SELECT merchant, AVG(amount) as avg_amount, COUNT(*) as tx_count
+           FROM transactions
+           WHERE type = 'OUTGOING' AND merchant IS NOT NULL AND merchant != ''
+             AND date(timestamp) >= ?
+           GROUP BY merchant HAVING COUNT(*) >= 3
+         ) stats ON t.merchant = stats.merchant
+         WHERE t.type = 'OUTGOING'
+           AND date(t.timestamp) >= ? AND date(t.timestamp) <= ?
+           AND t.amount >= stats.avg_amount * 2.5
+         ORDER BY multiplier DESC LIMIT 5`,
+        [ninetyDaysAgo, weekStartStr, weekEndStr]
+      );
+
+      const weekDayMap = new Map<string, { outgoing: number; incoming: number }>();
+      let weekOutgoing = 0, weekIncoming = 0;
+      for (const r of weekRows) {
+        weekDayMap.set(r.day, r);
+        weekOutgoing += r.outgoing;
+        weekIncoming += r.incoming;
+      }
+
+      const avgWeeklySpend = (baseline.total_outgoing ?? 0) / 3;
+      const vsAvg = avgWeeklySpend > 0
+        ? (((weekOutgoing - avgWeeklySpend) / avgWeeklySpend) * 100).toFixed(0)
+        : null;
+
+      const label = weeksBack === 0 ? "This week" : `Week of ${weekStartStr}`;
+      let text = `Weekly digest — ${label} (${weekStartStr} → ${weekEndStr})\n`;
+      text += "─".repeat(55) + "\n\n";
+      text += `Total spending:   ${fmtAmount(weekOutgoing)}`;
+      if (vsAvg !== null) {
+        const sign = Number(vsAvg) >= 0 ? "+" : "";
+        text += `  (${sign}${vsAvg}% vs 3-week avg of ${fmtAmount(avgWeeklySpend)})`;
+      }
+      text += `\nTotal income:     ${fmtAmount(weekIncoming)}\n`;
+      text += `Avg daily spend:  ${fmtAmount(weekOutgoing / 7)}\n\n`;
+
+      text += `Day-by-day:\n`;
+      const cur = new Date(weekStartStr + "T00:00:00Z");
+      const wEnd = new Date(weekEndStr + "T00:00:00Z");
+      while (cur <= wEnd) {
+        const d = cur.toISOString().slice(0, 10);
+        const out = weekDayMap.get(d)?.outgoing ?? 0;
+        const bar = out > 0 ? "▓".repeat(Math.min(Math.round(out / 500), 20)) : "·";
+        text += `  ${d}  ${fmtAmount(out).padStart(10)}  ${bar}\n`;
+        cur.setUTCDate(cur.getUTCDate() + 1);
+      }
+
+      if (topMerchants.length > 0) {
+        text += `\nTop merchants:\n`;
+        topMerchants.forEach((m: any, i: number) => {
+          text += `  ${i + 1}. ${truncate(m.merchant, 35).padEnd(37)} ${fmtAmount(m.total)}  (${m.cnt} txns)\n`;
+        });
+      }
+
+      if (unusualRows.length > 0) {
+        text += `\n⚠️  Unusual charges this week:\n`;
+        unusualRows.forEach((r: any) => {
+          text += `  ${(r.timestamp as string).slice(0, 10)} | ${fmtAmount(r.amount)} | ${truncate(r.merchant, 30)} — ${r.multiplier}x your usual ${fmtAmount(r.avg_amount)}\n`;
+        });
+      }
+
+      return { content: [{ type: "text", text }] };
+    }
+
+    // ── get_tax_year_report ─────────────────────────────────────────────────
+    if (request.params.name === "get_tax_year_report") {
+      const today = new Date();
+      const currentMonth = today.getMonth() + 1;
+      const currentYear  = today.getFullYear();
+      const defaultFYStart = currentMonth >= 4 ? currentYear : currentYear - 1;
+      const fyStartYear = Number(request.params.arguments?.year ?? defaultFYStart);
+
+      const startDate = `${fyStartYear}-04-01`;
+      const endDate   = `${fyStartYear + 1}-03-31`;
+      const fyLabel   = `FY ${fyStartYear}-${String(fyStartYear + 1).slice(2)}`;
+
+      const [summary] = await runQuery<any>(
+        `SELECT SUM(CASE WHEN type = 'INCOMING' THEN amount ELSE 0 END) as total_incoming,
+                SUM(CASE WHEN type = 'OUTGOING' THEN amount ELSE 0 END) as total_outgoing,
+                COUNT(*) as tx_count
+         FROM transactions
+         WHERE date(timestamp) >= ? AND date(timestamp) <= ?`,
+        [startDate, endDate]
+      );
+
+      const monthRows = await runQuery<any>(
+        `SELECT strftime('%Y-%m', timestamp) as month,
+                SUM(CASE WHEN type = 'INCOMING' THEN amount ELSE 0 END) as incoming,
+                SUM(CASE WHEN type = 'OUTGOING' THEN amount ELSE 0 END) as outgoing
+         FROM transactions
+         WHERE date(timestamp) >= ? AND date(timestamp) <= ?
+         GROUP BY month ORDER BY month ASC`,
+        [startDate, endDate]
+      );
+
+      const topMerchants = await runQuery<any>(
+        `SELECT merchant, SUM(amount) as total, COUNT(*) as cnt
+         FROM transactions
+         WHERE type = 'OUTGOING' AND date(timestamp) >= ? AND date(timestamp) <= ?
+           AND merchant IS NOT NULL AND merchant != ''
+         GROUP BY merchant ORDER BY total DESC LIMIT 10`,
+        [startDate, endDate]
+      );
+
+      const incoming = summary.total_incoming || 0;
+      const outgoing = summary.total_outgoing || 0;
+      const savings  = incoming - outgoing;
+      const savingsRate = incoming > 0 ? ((savings / incoming) * 100).toFixed(1) : "N/A";
+      const isComplete = today.toISOString().slice(0, 10) > endDate;
+      const completionNote = isComplete ? "" : ` (in progress — FY ends ${endDate})`;
+
+      let text = `${fyLabel} Report${completionNote}\n`;
+      text += "─".repeat(50) + "\n\n";
+      text += `Total income:    ${fmtAmount(incoming)}\n`;
+      text += `Total spending:  ${fmtAmount(outgoing)}\n`;
+      text += `Net savings:     ${savings >= 0 ? "+" : ""}${fmtAmount(savings)}\n`;
+      text += `Savings rate:    ${savingsRate}%\n`;
+      text += `Transactions:    ${(summary.tx_count as number).toLocaleString()}\n\n`;
+
+      if (monthRows.length > 0) {
+        text += `Month-by-month:\n`;
+        for (const r of monthRows) {
+          const net = r.incoming - r.outgoing;
+          const pad = (s: string) => s.padStart(12);
+          text += `  ${r.month}  In: ${pad(fmtAmount(r.incoming))}  Out: ${pad(fmtAmount(r.outgoing))}  Net: ${pad((net >= 0 ? "+" : "") + fmtAmount(net))}\n`;
+        }
+        text += "\n";
+      }
+
+      if (topMerchants.length > 0) {
+        text += `Top 10 merchants by spend:\n`;
+        topMerchants.forEach((m: any, i: number) => {
+          const pct = outgoing > 0 ? ((m.total / outgoing) * 100).toFixed(1) : "0.0";
+          text += `  ${String(i + 1).padStart(2)}. ${truncate(m.merchant, 35).padEnd(37)} ${fmtAmount(m.total).padStart(12)} (${pct}%)\n`;
+        });
+      }
+
+      return { content: [{ type: "text", text }] };
+    }
+
+    // ── get_unusual_transactions ────────────────────────────────────────────
+    if (request.params.name === "get_unusual_transactions") {
+      const today         = new Date().toISOString().slice(0, 10);
+      const ninetyDaysAgo = new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10);
+      const startDate  = (request.params.arguments?.startDate  as string) || ninetyDaysAgo;
+      const endDate    = (request.params.arguments?.endDate    as string) || today;
+      const multiplier = Number(request.params.arguments?.multiplier ?? 2.5);
+      const minHistory = Number(request.params.arguments?.minHistory ?? 3);
+      const limit      = Math.min(Number(request.params.arguments?.limit ?? 20), 100);
+
+      const rows = await runQuery<any>(
+        `SELECT t.uuid, t.timestamp, t.merchant, t.amount,
+                stats.avg_amount, stats.tx_count,
+                ROUND(CAST(t.amount AS REAL) / stats.avg_amount, 1) as multiplier
+         FROM transactions t
+         JOIN (
+           SELECT merchant, AVG(amount) as avg_amount, COUNT(*) as tx_count
+           FROM transactions
+           WHERE type = 'OUTGOING' AND merchant IS NOT NULL AND merchant != ''
+             AND date(timestamp) >= ? AND date(timestamp) <= ?
+           GROUP BY merchant HAVING COUNT(*) >= ?
+         ) stats ON t.merchant = stats.merchant
+         WHERE t.type = 'OUTGOING'
+           AND date(t.timestamp) >= ? AND date(t.timestamp) <= ?
+           AND t.amount >= stats.avg_amount * ?
+         ORDER BY multiplier DESC
+         LIMIT ?`,
+        [startDate, endDate, minHistory, startDate, endDate, multiplier, limit]
+      );
+
+      if (!rows.length) {
+        return { content: [{ type: "text", text: `No unusual transactions found (${startDate} → ${endDate}, threshold: ${multiplier}x above average, min ${minHistory} past transactions).` }] };
+      }
+
+      let text = `Unusual transactions (${startDate} → ${endDate}) — above ${multiplier}x merchant average:\n\n`;
+      rows.forEach((r: any) => {
+        text += `${(r.timestamp as string).slice(0, 10)} | ${fmtAmount(r.amount)} | ${truncate(r.merchant, 35)}\n`;
+        text += `   ${r.multiplier}x your usual ${fmtAmount(r.avg_amount)} avg (based on ${r.tx_count} transactions)\n`;
+      });
+
+      return { content: [{ type: "text", text }] };
+    }
+
+    // ── get_category_breakdown ──────────────────────────────────────────────
+    if (request.params.name === "get_category_breakdown") {
+      const today         = new Date().toISOString().slice(0, 10);
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+      const startDate = (request.params.arguments?.startDate as string) || thirtyDaysAgo;
+      const endDate   = (request.params.arguments?.endDate   as string) || today;
+
+      const rows = await runQuery<any>(
+        `SELECT merchant, SUM(amount) as total, COUNT(*) as cnt
+         FROM transactions
+         WHERE type = 'OUTGOING' AND merchant IS NOT NULL AND merchant != ''
+           AND date(timestamp) >= ? AND date(timestamp) <= ?
+         GROUP BY merchant`,
+        [startDate, endDate]
+      );
+
+      interface CatData { total: number; count: number; merchantAmounts: Map<string, number> }
+      const cats = new Map<string, CatData>();
+      let grandTotal = 0;
+
+      for (const r of rows) {
+        const cat = categorize(r.merchant as string);
+        if (!cats.has(cat)) cats.set(cat, { total: 0, count: 0, merchantAmounts: new Map() });
+        const d = cats.get(cat)!;
+        d.total += r.total;
+        d.count += r.cnt;
+        d.merchantAmounts.set(r.merchant, (d.merchantAmounts.get(r.merchant) ?? 0) + r.total);
+        grandTotal += r.total;
+      }
+
+      const sorted = [...cats.entries()].sort((a, b) => b[1].total - a[1].total);
+
+      let text = `Category breakdown (${startDate} → ${endDate}):\n\n`;
+      for (const [cat, d] of sorted) {
+        const pct = grandTotal > 0 ? ((d.total / grandTotal) * 100).toFixed(1) : "0.0";
+        text += `${cat.padEnd(20)} ${fmtAmount(d.total).padStart(12)}  (${pct.padStart(5)}%)  ${d.count} txns\n`;
+        const top3 = [...d.merchantAmounts.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 3)
+          .map(([m]) => truncate(m, 20))
+          .join(", ");
+        text += `  └─ ${top3}\n`;
+      }
+      text += `\n${"TOTAL".padEnd(20)} ${fmtAmount(grandTotal).padStart(12)}\n`;
+
+      return { content: [{ type: "text", text }] };
+    }
+
+    // ── get_spending_streak ─────────────────────────────────────────────────
+    if (request.params.name === "get_spending_streak") {
+      const threshold = Number(request.params.arguments?.threshold ?? 1000);
+      const lookback  = Math.min(Number(request.params.arguments?.lookback ?? 90), 365);
+
+      const today = new Date();
+      const todayStr  = today.toISOString().slice(0, 10);
+      const startDate = new Date(today.getTime() - lookback * 864e5).toISOString().slice(0, 10);
+
+      const rows = await runQuery<any>(
+        `SELECT date(timestamp) as day, SUM(amount) as total
+         FROM transactions
+         WHERE type = 'OUTGOING' AND date(timestamp) >= ? AND date(timestamp) <= ?
+         GROUP BY day`,
+        [startDate, todayStr]
+      );
+
+      const spendMap = new Map<string, number>();
+      for (const r of rows) spendMap.set(r.day as string, r.total as number);
+
+      // Build ordered list of all dates in range
+      const allDates: string[] = [];
+      const cur = new Date(startDate + "T00:00:00Z");
+      const end = new Date(todayStr + "T00:00:00Z");
+      while (cur <= end) {
+        allDates.push(cur.toISOString().slice(0, 10));
+        cur.setUTCDate(cur.getUTCDate() + 1);
+      }
+
+      // Current streak (from today backwards)
+      let currentStreak = 0;
+      for (let i = allDates.length - 1; i >= 0; i--) {
+        if ((spendMap.get(allDates[i]) ?? 0) <= threshold) currentStreak++;
+        else break;
+      }
+
+      // Longest streak in the period
+      let longestStreak = 0, run = 0;
+      for (const d of allDates) {
+        if ((spendMap.get(d) ?? 0) <= threshold) { run++; if (run > longestStreak) longestStreak = run; }
+        else run = 0;
+      }
+
+      const threshFmt = fmtAmount(threshold);
+      let text = `Spending streak (days under ${threshFmt}/day):\n\n`;
+      text += `Current streak:       ${currentStreak} day${currentStreak !== 1 ? "s" : ""}\n`;
+      text += `Longest in ${lookback} days:  ${longestStreak} day${longestStreak !== 1 ? "s" : ""}\n`;
+
+      if (currentStreak >= 7)      text += `\n🔥 A full week-long streak — solid!`;
+      else if (currentStreak >= 3) text += `\n💪 ${currentStreak} days in a row.`;
+      else if (currentStreak === 0) text += `\nToday was over ${threshFmt}.`;
+
+      text += `\n\nLast 7 days:\n`;
+      for (const d of allDates.slice(-7)) {
+        const spend = spendMap.get(d) ?? 0;
+        text += `  ${spend <= threshold ? "✅" : "❌"} ${d}  ${fmtAmount(spend)}\n`;
+      }
+
+      return { content: [{ type: "text", text }] };
+    }
+
     throw new Error(`Unknown tool: ${request.params.name}`);
   } catch (error: any) {
     return {
@@ -613,7 +1096,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("Fold MCP Server v3.0.0 running on stdio");
+  console.error("Fold MCP Server v4.0.0 running on stdio");
 }
 
 main().catch((error) => {

@@ -75,30 +75,70 @@ This pulls your full history into a local SQLite database. Each year syncs in ab
 
 ---
 
+## Staying up to date
+
+When new features are pushed, anyone who cloned the repo can update by running:
+
+```bash
+git pull
+cd fold-mcp && npm run build
+```
+
+Or ask Claude directly: **"Are there any updates available?"** — the `check_for_updates` tool will fetch from GitHub and tell you how many commits behind you are and the exact command to run.
+
+---
+
 ## Available Tools
 
 Once installed, Claude has access to these tools:
+
+**Data & sync**
 
 | Tool | What it does |
 |---|---|
 | `get_sync_status` | Check how fresh your local data is before asking questions |
 | `sync_fold_data` | Pull transactions from Fold into the local database |
+| `check_for_updates` | Check if a newer version of fold-mcp is available on GitHub |
+
+**Transactions**
+
+| Tool | What it does |
+|---|---|
 | `get_recent_transactions` | Get the most recent N transactions |
 | `search_transactions` | Filter by merchant, narration, tag, date range, amount, mode, or type |
+
+**Spending analysis**
+
+| Tool | What it does |
+|---|---|
 | `get_spending_summary` | Income vs spending with top merchants and daily average |
 | `get_merchant_summary` | Top merchants by total spend or transaction count |
 | `get_monthly_trend` | Month-by-month income, spending, and net cash flow |
 | `get_balance_history` | Average account balance by month |
 | `get_spending_by_mode` | Breakdown by payment mode (CARD, UPI, NEFT, etc.) |
+| `get_category_breakdown` | Spending grouped into categories: Food Delivery, Transport, Shopping, etc. |
+| `get_unusual_transactions` | Charges that are way above your normal spend at a merchant |
+
+**Routines & check-ins**
+
+| Tool | What it does |
+|---|---|
+| `get_weekly_digest` | 7-day summary vs your rolling average, with unusual charge alerts |
+| `get_tax_year_report` | Full April–March financial year report (income, spending, savings rate) |
+| `get_spending_streak` | How many consecutive days you've stayed under a daily spending limit |
 
 ### Example questions to ask Claude
 
 - "What did I spend last month?"
 - "How much have I spent on Swiggy this year?"
 - "Show me my top 10 merchants since January"
-- "Is my data up to date?" (uses `get_sync_status`)
-- "What's my average monthly spend for the last 6 months?"
-- "Find all transactions above ₹5000 in March"
+- "Is my data up to date?"
+- "Give me my weekly digest"
+- "Are there any unusual charges in the last 3 months?"
+- "Show me my FY 2024-25 report"
+- "Break my spending down by category for this month"
+- "How's my spending streak this week?"
+- "Are there any updates available?"
 
 ---
 
