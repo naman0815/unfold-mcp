@@ -160,7 +160,21 @@ STEP 7 — Configure Claude Desktop to use the MCP server:
 
 ─────────────────────────────────────────
 
-STEP 8 — Confirm setup is complete and tell me to:
+STEP 8 — Verify the build exists before finishing:
+  Check that the compiled server file exists:
+    macOS:   ls fold-mcp/build/index.js
+    Windows: Test-Path fold-mcp\build\index.js
+
+  If it is MISSING (the build directory is absent or empty), re-run the build now:
+    cd fold-mcp && npm install && npm run build && cd ..
+  Then confirm the file exists before continuing.
+
+  Note: the build/ directory is not stored in git — it must be compiled locally.
+  If it disappears (after a git pull, clean, or machine restart), re-run the build command above.
+
+─────────────────────────────────────────
+
+STEP 9 — Confirm setup is complete and tell me to:
   1. Fully quit and relaunch Claude Desktop.
      macOS: Cmd+Q, then reopen from Applications.
      Windows: Right-click the tray icon → Quit, then reopen from Start Menu.
