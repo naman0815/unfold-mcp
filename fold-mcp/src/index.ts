@@ -5,59 +5,71 @@ import {
   ListToolsRequestSchema,
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
-import sqlite3 from "sqlite3";
+import initSqlJs from "sql.js";
+import type { Database, SqlJsStatic } from "sql.js";
 import { exec } from "child_process";
 import path from "path";
+import fs from "fs";
 
 import { fileURLToPath } from "url";
 
 // ─── Paths ───────────────────────────────────────────────────────────────────
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const dbPath    = path.resolve(__dirname, "..", "..", "db.sqlite");
-const ftsDbPath = path.resolve(__dirname, "..", "..", "db_fts.sqlite");
+const dbPath = path.resolve(__dirname, "..", "..", "db.sqlite");
 const cliPath = path.resolve(__dirname, "..", "..",
   process.platform === "win32" ? "unfold_patched.exe" : "unfold_patched"
 );
 const cliDir  = path.resolve(__dirname, "..", "..");
 
-// ─── SQLite ───────────────────────────────────────────────────────────────────
-const db    = new sqlite3.Database(dbPath,    sqlite3.OPEN_READONLY);
-const ftsDb = new sqlite3.Database(ftsDbPath, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE);
+// ─── SQLite (sql.js — pure WASM, no native compilation) ──────────────────────
+// eslint-disable-next-line prefer-const
+let SQL: SqlJsStatic;
+let db: Database;    // main DB loaded from db.sqlite (reloaded after sync)
+let ftsDb: Database; // in-memory FTS index (rebuilt at startup and after sync)
 
 function runQuery<T>(query: string, params: any[] = []): Promise<T[]> {
-  return new Promise((resolve, reject) => {
-    db.all(query, params, (err, rows) => {
-      if (err) reject(err);
-      else resolve(rows as T[]);
-    });
-  });
+  try {
+    const stmt = db.prepare(query);
+    stmt.bind(params);
+    const rows: T[] = [];
+    while (stmt.step()) rows.push(stmt.getAsObject() as T);
+    stmt.free();
+    return Promise.resolve(rows);
+  } catch (err) {
+    return Promise.reject(err);
+  }
 }
 
 function runFtsQuery<T>(query: string, params: any[] = []): Promise<T[]> {
-  return new Promise((resolve, reject) => {
-    ftsDb.all(query, params, (err, rows) => {
-      if (err) reject(err);
-      else resolve(rows as T[]);
-    });
-  });
+  try {
+    const stmt = ftsDb.prepare(query);
+    stmt.bind(params);
+    const rows: T[] = [];
+    while (stmt.step()) rows.push(stmt.getAsObject() as T);
+    stmt.free();
+    return Promise.resolve(rows);
+  } catch (err) {
+    return Promise.reject(err);
+  }
 }
 
 function runFtsExec(query: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    ftsDb.exec(query, (err) => { if (err) reject(err); else resolve(); });
-  });
+  try {
+    ftsDb.exec(query);
+    return Promise.resolve();
+  } catch (err) {
+    return Promise.reject(err);
+  }
 }
 
 // ─── FTS index setup ─────────────────────────────────────────────────────────
 async function initFts(): Promise<void> {
   await runFtsExec(`
-    CREATE VIRTUAL TABLE IF NOT EXISTS tx_fts USING fts5(
-      uuid UNINDEXED,
-      merchant,
-      narration,
-      summary,
-      tokenize='porter unicode61'
+    CREATE VIRTUAL TABLE IF NOT EXISTS tx_fts USING fts4(
+      uuid, merchant, narration, summary,
+      notindexed=uuid,
+      tokenize=porter
     )
   `);
   await rebuildFtsIfStale();
@@ -75,18 +87,14 @@ async function rebuildFtsIfStale(): Promise<void> {
      FROM transactions`
   );
 
-  await runFtsExec(`DELETE FROM tx_fts`);
-  await new Promise<void>((resolve, reject) => {
-    ftsDb.serialize(() => {
-      ftsDb.run("BEGIN");
-      const stmt = ftsDb.prepare(
-        `INSERT INTO tx_fts(uuid, merchant, narration, summary) VALUES (?,?,?,?)`
-      );
-      for (const r of rows) stmt.run([r.uuid, r.merchant, r.narration, r.summary]);
-      stmt.finalize();
-      ftsDb.run("COMMIT", (err) => { if (err) reject(err); else resolve(); });
-    });
-  });
+  ftsDb.exec("DELETE FROM tx_fts");
+  ftsDb.exec("BEGIN");
+  const stmt = ftsDb.prepare(
+    `INSERT INTO tx_fts(uuid, merchant, narration, summary) VALUES (?,?,?,?)`
+  );
+  for (const r of rows) stmt.run([r.uuid, r.merchant, r.narration, r.summary]);
+  stmt.free();
+  ftsDb.exec("COMMIT");
   console.error(`FTS index built: ${rows.length} rows`);
 }
 
@@ -739,7 +747,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         lines.push(`Done: ${successCount} succeeded, ${failCount} failed out of ${batches.length} batches.`);
       }
 
-      rebuildFtsIfStale().catch(() => {});
+      if (successCount > 0) {
+        try {
+          const buf = fs.readFileSync(dbPath);
+          db.close();
+          db = new SQL.Database(buf);
+          ftsDb.exec("DELETE FROM tx_fts");
+          rebuildFtsIfStale().catch(() => {});
+        } catch { /* non-fatal — data visible after next restart */ }
+      }
       return { content: [{ type: "text", text: lines.join("\n") }] };
     }
 
@@ -1655,7 +1671,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 });
 
 async function main() {
+  // @ts-ignore — sql.js types don't expose the module-level assignment correctly
+  SQL = await initSqlJs();
+
+  try {
+    const buf = fs.readFileSync(dbPath);
+    db = new SQL.Database(buf);
+  } catch {
+    // db.sqlite doesn't exist yet (first run before any sync)
+    db = new SQL.Database();
+  }
+
+  ftsDb = new SQL.Database();
   await initFts();
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("Fold MCP Server v6.0.0 running on stdio");
