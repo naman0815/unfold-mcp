@@ -106,6 +106,7 @@ Once installed, Claude has access to these tools:
 |---|---|
 | `get_recent_transactions` | Get the most recent N transactions |
 | `search_transactions` | Filter by merchant, narration, tag, date range, amount, mode, or type |
+| `full_text_search` | Fast FTS5 search across all text fields — finds any word in merchant, narration, or summary |
 
 **Spending analysis**
 
@@ -118,6 +119,11 @@ Once installed, Claude has access to these tools:
 | `get_spending_by_mode` | Breakdown by payment mode (CARD, UPI, NEFT, etc.) |
 | `get_category_breakdown` | Spending grouped into categories: Food Delivery, Transport, Shopping, etc. |
 | `get_unusual_transactions` | Charges that are way above your normal spend at a merchant |
+| `get_recurring_merchants` | Subscriptions and habits — merchants you pay month after month |
+| `compare_periods` | Side-by-side comparison of two date ranges (e.g. this month vs last) |
+| `get_spending_forecast` | Projected month-end total based on your pace so far |
+| `get_account_breakdown` | Per-bank-account income, spending, and transaction count |
+| `get_day_of_week_patterns` | Which days of the week (or month) you spend the most |
 
 **Routines & check-ins**
 
@@ -139,6 +145,12 @@ Once installed, Claude has access to these tools:
 - "Break my spending down by category for this month"
 - "How's my spending streak this week?"
 - "Are there any updates available?"
+- "Find any transaction mentioning 'coffee'"
+- "Search for 'salary HDFC' across all my transactions"
+- "Which subscriptions am I paying every month?"
+- "Compare this month's spending vs last month"
+- "Am I on track with my spending this month?"
+- "Which day of the week do I spend the most?"
 
 ---
 
