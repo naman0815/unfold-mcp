@@ -132,6 +132,13 @@ Once installed, Claude has access to these tools:
 | `get_weekly_digest` | 7-day summary vs your rolling average, with unusual charge alerts |
 | `get_tax_year_report` | Full April–March financial year report (income, spending, savings rate) |
 | `get_spending_streak` | How many consecutive days you've stayed under a daily spending limit |
+| `get_savings_rate` | Month-by-month savings rate with rolling average, trend, and negative-savings flags |
+
+**Export**
+
+| Tool | What it does |
+|---|---|
+| `export_transactions_csv` | Export filtered transactions to a CSV file on disk (defaults to `~/Downloads/`) |
 
 ### Example questions to ask Claude
 
@@ -151,6 +158,8 @@ Once installed, Claude has access to these tools:
 - "Compare this month's spending vs last month"
 - "Am I on track with my spending this month?"
 - "Which day of the week do I spend the most?"
+- "What's my savings rate over the last 6 months?"
+- "Export all my transactions from January to March to a CSV"
 
 ---
 
