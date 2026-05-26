@@ -7,7 +7,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import initSqlJs from "sql.js";
 import type { Database, SqlJsStatic } from "sql.js";
-import { exec } from "child_process";
+import { exec, spawn } from "child_process";
 import path from "path";
 import fs from "fs";
 
@@ -27,6 +27,22 @@ const cliDir  = path.resolve(__dirname, "..", "..");
 let SQL: SqlJsStatic;
 let db: Database;    // main DB loaded from db.sqlite (reloaded after sync)
 let ftsDb: Database; // in-memory FTS index (rebuilt at startup and after sync)
+let dbLoadedAt = 0;  // mtime of db.sqlite when last loaded into memory
+
+function reloadDbFromDisk(): void {
+  const buf = fs.readFileSync(dbPath);
+  if (db) db.close();
+  db = new SQL.Database(buf);
+  dbLoadedAt = fs.statSync(dbPath).mtimeMs;
+  rebuildFtsIfStale().catch(() => {});
+}
+
+function reloadDbIfStale(): void {
+  try {
+    const mtime = fs.statSync(dbPath).mtimeMs;
+    if (mtime > dbLoadedAt) reloadDbFromDisk();
+  } catch { /* db doesn't exist yet — ignore */ }
+}
 
 function runQuery<T>(query: string, params: any[] = []): Promise<T[]> {
   try {
@@ -715,58 +731,32 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const endDate   = (request.params.arguments?.endDate   as string) || today;
 
       const batches = yearlyBatches(startDate, endDate);
-      const CONCURRENCY = 3;
-      const estimatedSecs = Math.ceil(batches.length / CONCURRENCY) * 10;
+      const estimatedSecs = batches.length * 15;
 
-      const lines: string[] = [
-        `📅 Syncing ${batches.length} yearly batch${batches.length === 1 ? "" : "es"} (${startDate} → ${endDate})`,
-        `   Up to ${CONCURRENCY} batches in parallel — estimated ~${estimatedSecs}s`,
-        ""
+      // Spawn each batch as a detached background process so we return
+      // immediately and never hit the MCP client's request timeout.
+      for (const { from, to } of batches) {
+        const child = spawn(
+          cliPath,
+          ["transactions", "-d", "--since", from, "--till", to],
+          { cwd: cliDir, detached: true, stdio: "ignore" }
+        );
+        child.unref();
+      }
+
+      const mins = Math.ceil(estimatedSecs / 60);
+      const lines = [
+        `🚀 Started ${batches.length} sync batch${batches.length === 1 ? "" : "es"} in background (${startDate} → ${endDate})`,
+        `   Estimated time: ~${estimatedSecs < 60 ? `${estimatedSecs}s` : `${mins} min`}`,
+        ``,
+        `Call get_sync_status to check progress — it will show the live transaction count as batches land.`,
       ];
-
-      // Pre-allocate result slots to preserve chronological display order
-      const results: { label: string; ok: boolean; detail: string }[] = new Array(batches.length);
-      let successCount = 0;
-      let failCount = 0;
-
-      await runBatchesConcurrent(batches, CONCURRENCY, (idx, from, to, result) => {
-        const label = `Batch ${idx + 1}/${batches.length}: ${from} → ${to}`;
-        if (result instanceof Error) {
-          results[idx] = { label, ok: false, detail: result.message };
-          failCount++;
-        } else {
-          const detail = result !== "ok" ? result.split("\n")[0] : "";
-          results[idx] = { label, ok: true, detail };
-          successCount++;
-        }
-      });
-
-      for (const r of results) {
-        lines.push(r.ok ? `✅ ${r.label}` : `❌ ${r.label} — ${r.detail}`);
-        if (r.ok && r.detail) lines.push(`   ${r.detail}`);
-      }
-
-      lines.push("");
-      if (failCount > 0 && failCount === batches.length) {
-        lines.push(`All batches failed. Your session token may have expired — run the unfold login command to re-authenticate, then sync again.`);
-      } else {
-        lines.push(`Done: ${successCount} succeeded, ${failCount} failed out of ${batches.length} batches.`);
-      }
-
-      if (successCount > 0) {
-        try {
-          const buf = fs.readFileSync(dbPath);
-          db.close();
-          db = new SQL.Database(buf);
-          ftsDb.exec("DELETE FROM tx_fts");
-          rebuildFtsIfStale().catch(() => {});
-        } catch { /* non-fatal — data visible after next restart */ }
-      }
       return { content: [{ type: "text", text: lines.join("\n") }] };
     }
 
     // ── get_sync_status ─────────────────────────────────────────────────────
     if (request.params.name === "get_sync_status") {
+      reloadDbIfStale(); // pick up any batches that completed since last load
       const [stats] = await runQuery<any>(
         `SELECT COUNT(*) as total,
                 MIN(date(timestamp)) as earliest,
@@ -1683,6 +1673,7 @@ async function main() {
   try {
     const buf = fs.readFileSync(dbPath);
     db = new SQL.Database(buf);
+    dbLoadedAt = fs.statSync(dbPath).mtimeMs;
   } catch {
     // db.sqlite doesn't exist yet (first run before any sync)
     db = new SQL.Database();
