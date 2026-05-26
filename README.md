@@ -1,6 +1,6 @@
-# fold-mcp
+# Unfold MCP
 
-A local MCP server for [Fold](https://fold.money) that lets you query and analyze your spending data directly from Claude. Everything runs on your machine — no data leaves your computer.
+An unofficial local MCP server for [Fold Money](https://fold.money) that lets you query and analyze your spending data directly from Claude. Everything runs on your machine — no data leaves your computer.
 
 ---
 
@@ -185,3 +185,7 @@ The MCP server only reads from SQLite. All writes go through the Go CLI, which h
 - `db.sqlite` is gitignored and never leaves your machine.
 - Auth tokens live at `~/.config/unfold/config.yaml`, scoped to your OS user.
 - If you share a Claude account with others, they cannot see your spending data because MCP servers run locally on each person's own computer.
+
+## Credits
+- [Fold Money](https://fold.money) for their Account Aggregator integration
+- [Unfold] (https://github.com/wantguns/unfold) for the CLI.
