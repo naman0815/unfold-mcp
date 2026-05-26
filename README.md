@@ -197,4 +197,4 @@ The MCP server only reads from SQLite. All writes go through the Go CLI, which h
 
 ## Credits
 - [Fold Money](https://fold.money) for their Account Aggregator integration
-- [Unfold](https://github.com/wantguns/unfold) for the CLI.
+- [Unfold](https://github.com/wantguns/unfold) for the CLI and API.
