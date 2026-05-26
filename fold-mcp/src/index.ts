@@ -10,6 +10,7 @@ import type { Database, SqlJsStatic } from "sql.js";
 import { exec, spawn } from "child_process";
 import path from "path";
 import fs from "fs";
+import os from "os";
 
 import { fileURLToPath } from "url";
 
@@ -575,6 +576,37 @@ const FULL_TEXT_SEARCH_TOOL: Tool = {
   }
 };
 
+const EXPORT_TRANSACTIONS_CSV_TOOL: Tool = {
+  name: "export_transactions_csv",
+  description: "Export transactions to a CSV file on disk. Same filters as search_transactions. Defaults to ~/Downloads/fold-export-YYYY-MM-DD.csv. Returns the file path and row count.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      startDate:  { type: "string",  description: "Filter from this date (YYYY-MM-DD)." },
+      endDate:    { type: "string",  description: "Filter to this date (YYYY-MM-DD)." },
+      type:       { type: "string",  description: "INCOMING or OUTGOING." },
+      mode:       { type: "string",  description: "CARD, UPI, NEFT, OTHERS, etc." },
+      query:      { type: "string",  description: "Filter by merchant name (LIKE match)." },
+      minAmount:  { type: "number",  description: "Minimum amount in ₹." },
+      maxAmount:  { type: "number",  description: "Maximum amount in ₹." },
+      outputPath: { type: "string",  description: "Full path for the CSV file. Defaults to ~/Downloads/fold-export-YYYY-MM-DD.csv." }
+    }
+  }
+};
+
+const GET_SAVINGS_RATE_TOOL: Tool = {
+  name: "get_savings_rate",
+  description: "Month-by-month savings rate: (income − spending) / income. Shows trend, rolling 3-month average, and flags negative-savings months. Useful for tracking financial health over time.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      startDate:        { type: "string",  description: "Start date (YYYY-MM-DD). Defaults to 12 months ago." },
+      endDate:          { type: "string",  description: "End date (YYYY-MM-DD). Defaults to today." },
+      excludeTransfers: { type: "boolean", description: "Exclude internal transfers. Default false." }
+    }
+  }
+};
+
 // ─── Server ───────────────────────────────────────────────────────────────────
 const server = new Server(
   { name: "fold-mcp", version: "6.0.0" },
@@ -604,6 +636,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     GET_ACCOUNT_BREAKDOWN_TOOL,
     GET_DAY_OF_WEEK_PATTERNS_TOOL,
     FULL_TEXT_SEARCH_TOOL,
+    EXPORT_TRANSACTIONS_CSV_TOOL,
+    GET_SAVINGS_RATE_TOOL,
   ],
 }));
 
@@ -1655,6 +1689,157 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 displayed.map(formatTransaction).join("\n")
         }]
       };
+    }
+
+    // ── export_transactions_csv ──────────────────────────────────────────────
+    if (request.params.name === "export_transactions_csv") {
+      const startDate = request.params.arguments?.startDate as string | undefined;
+      const endDate   = request.params.arguments?.endDate   as string | undefined;
+      const type      = request.params.arguments?.type      as string | undefined;
+      const mode      = request.params.arguments?.mode      as string | undefined;
+      const query     = request.params.arguments?.query     as string | undefined;
+      const minAmount = request.params.arguments?.minAmount as number | undefined;
+      const maxAmount = request.params.arguments?.maxAmount as number | undefined;
+
+      const today = new Date().toISOString().slice(0, 10);
+      const defaultPath = path.join(os.homedir(), "Downloads", `fold-export-${today}.csv`);
+      const outputPath  = (request.params.arguments?.outputPath as string) || defaultPath;
+
+      const conditions: string[] = [];
+      const params: any[] = [];
+      if (startDate)               { conditions.push("date(timestamp) >= ?"); params.push(startDate); }
+      if (endDate)                 { conditions.push("date(timestamp) <= ?"); params.push(endDate); }
+      if (type)                    { conditions.push("type = ?");             params.push(type.toUpperCase()); }
+      if (mode)                    { conditions.push("mode = ?");             params.push(mode.toUpperCase()); }
+      if (query)                   { conditions.push("merchant LIKE ?");      params.push(`%${query}%`); }
+      if (minAmount !== undefined) { conditions.push("amount >= ?");          params.push(minAmount); }
+      if (maxAmount !== undefined) { conditions.push("amount <= ?");          params.push(maxAmount); }
+
+      const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+      const rows = await runQuery<any>(
+        `SELECT date(timestamp) as date, merchant, narration, amount, type, mode,
+                COALESCE(account_id, '') as account_id
+         FROM transactions ${where} ORDER BY timestamp DESC`,
+        params
+      );
+
+      const escape = (v: string | number | null) => {
+        const s = String(v ?? "");
+        return s.includes(",") || s.includes('"') || s.includes("\n")
+          ? `"${s.replace(/"/g, '""')}"`
+          : s;
+      };
+
+      const header = "date,merchant,narration,amount,type,mode,account_id";
+      const csvLines = [header];
+      for (const r of rows) {
+        csvLines.push([
+          escape(r.date),
+          escape(cleanMerchant(r.merchant || "")),
+          escape(r.narration || ""),
+          escape(r.amount),
+          escape(r.type),
+          escape(r.mode || ""),
+          escape(r.account_id),
+        ].join(","));
+      }
+
+      fs.writeFileSync(outputPath, csvLines.join("\n") + "\n", "utf8");
+
+      const filterNote = conditions.length
+        ? ` | filters: ${[
+            startDate ? `from ${startDate}` : "",
+            endDate   ? `to ${endDate}`   : "",
+            type      ? `type=${type}`    : "",
+            mode      ? `mode=${mode}`    : "",
+            query     ? `merchant≈${query}` : "",
+          ].filter(Boolean).join(", ")}`
+        : " | no filters (all transactions)";
+
+      return {
+        content: [{
+          type: "text",
+          text: `✅ Exported ${rows.length.toLocaleString()} transactions to:\n${outputPath}${filterNote}\n\nColumns: date, merchant, narration, amount, type, mode, account_id`,
+        }]
+      };
+    }
+
+    // ── get_savings_rate ─────────────────────────────────────────────────────
+    if (request.params.name === "get_savings_rate") {
+      const today           = new Date().toISOString().slice(0, 10);
+      const twelveMonthsAgo = new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10);
+      const startDate        = (request.params.arguments?.startDate as string) || twelveMonthsAgo;
+      const endDate          = (request.params.arguments?.endDate   as string) || today;
+      const excludeTransfers = Boolean(request.params.arguments?.excludeTransfers);
+      const xferClause       = excludeTransfers ? " AND excluded_from_cash_flow = 0" : "";
+
+      const rows = await runQuery<any>(
+        `SELECT strftime('%Y-%m', timestamp) as month,
+                SUM(CASE WHEN type = 'INCOMING' THEN amount ELSE 0 END) as incoming,
+                SUM(CASE WHEN type = 'OUTGOING' THEN amount ELSE 0 END) as outgoing
+         FROM transactions
+         WHERE date(timestamp) >= ? AND date(timestamp) <= ?${xferClause}
+         GROUP BY month ORDER BY month ASC`,
+        [startDate, endDate]
+      );
+
+      if (!rows.length) {
+        return { content: [{ type: "text", text: `No transactions found from ${startDate} to ${endDate}.` }] };
+      }
+
+      interface MonthData { month: string; incoming: number; outgoing: number; savings: number; rate: number | null }
+      const months: MonthData[] = rows.map((r: any) => {
+        const incoming = r.incoming as number;
+        const outgoing = r.outgoing as number;
+        const savings  = incoming - outgoing;
+        const rate     = incoming > 0 ? (savings / incoming) * 100 : null;
+        return { month: r.month as string, incoming, outgoing, savings, rate };
+      });
+
+      // Rolling 3-month average savings rate
+      const rolling3: (number | null)[] = months.map((_, i) => {
+        const window = months.slice(Math.max(0, i - 2), i + 1).filter(m => m.rate !== null);
+        if (!window.length) return null;
+        return window.reduce((s, m) => s + m.rate!, 0) / window.length;
+      });
+
+      const allRates   = months.filter(m => m.rate !== null).map(m => m.rate!);
+      const avgRate    = allRates.length > 0 ? allRates.reduce((s, r) => s + r, 0) / allRates.length : null;
+      const negMonths  = months.filter(m => m.savings < 0);
+      const xferNote   = excludeTransfers ? " (transfers excluded)" : "";
+
+      // Trend: compare first half avg vs second half avg
+      let trendNote = "";
+      if (allRates.length >= 4) {
+        const half   = Math.floor(allRates.length / 2);
+        const early  = allRates.slice(0, half).reduce((s, r) => s + r, 0) / half;
+        const recent = allRates.slice(half).reduce((s, r) => s + r, 0) / (allRates.length - half);
+        const delta  = recent - early;
+        trendNote = Math.abs(delta) < 1 ? "stable" :
+          delta > 0 ? `↑ improving (+${delta.toFixed(1)}pp over period)` :
+                      `↓ declining (${delta.toFixed(1)}pp over period)`;
+      }
+
+      let text = `Savings rate (${startDate} → ${endDate})${xferNote}:\n`;
+      if (avgRate !== null) text += `Overall avg: ${avgRate.toFixed(1)}%${trendNote ? `  |  Trend: ${trendNote}` : ""}\n`;
+      text += "\n";
+      text += `Month    | Income        | Spending      | Savings       | Rate    | 3M Avg\n`;
+      text += `---------|---------------|---------------|---------------|---------|---------\n`;
+
+      months.forEach((m, i) => {
+        const rateStr = m.rate !== null ? `${m.rate.toFixed(1)}%` : "N/A";
+        const r3 = rolling3[i];
+        const r3Str = r3 !== null ? `${r3.toFixed(1)}%` : "—";
+        const flag = m.savings < 0 ? " ⚠️" : "";
+        text += `${m.month}  | ${fmtAmount(m.incoming).padStart(13)} | ${fmtAmount(m.outgoing).padStart(13)} | ${(m.savings >= 0 ? "+" : "") + fmtAmount(m.savings).padStart(12)} | ${rateStr.padStart(7)} | ${r3Str.padStart(7)}${flag}\n`;
+      });
+
+      if (negMonths.length > 0) {
+        text += `\n⚠️  Negative savings months (${negMonths.length}): ${negMonths.map(m => m.month).join(", ")}\n`;
+        text += `   These months you spent more than you earned. Consider reviewing what drove the deficit.\n`;
+      }
+
+      return { content: [{ type: "text", text }] };
     }
 
     throw new Error(`Unknown tool: ${request.params.name}`);
